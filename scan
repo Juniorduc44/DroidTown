@@ -33,6 +33,9 @@ if [ ! -e "$TARGET" ]; then
     exit 1
 fi
 
+export SCAN_OUTPUT_DIR="$(pwd)"
+export SCAN_TARGET_NAME="$(basename "$1" | sed 's/\.[^.]*$//')"
+
 if [ -f "$TARGET" ]; then
     cd "$AGENT_DIR"
     exec "$VENV_PYTHON" agent.py "$TARGET"

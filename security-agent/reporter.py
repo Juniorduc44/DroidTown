@@ -1,3 +1,6 @@
+import os
+import re
+from pathlib import Path
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
 from rich.console import Console
@@ -65,9 +68,22 @@ Raw findings from all files:
     # Display beautiful colored report in terminal
     console.print(Panel(Markdown(report), title="🔐 DroidTown Security Report", border_style="bold blue", padding=(1, 2)))
 
-    # Save markdown version
-    with open("security-report.md", "w", encoding="utf-8") as f:
+    # Determine output path
+    output_dir = Path(os.environ.get("SCAN_OUTPUT_DIR", "."))
+    target_name = os.environ.get("SCAN_TARGET_NAME", "scan")
+    target_name = re.sub(r'[^\w\-]', '_', target_name)
+
+    # Find next available number
+    n = 0
+    while True:
+        report_name = f"{target_name}_{n:02d}_report.md"
+        report_path = output_dir / report_name
+        if not report_path.exists():
+            break
+        n += 1
+
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(report)
 
-    console.print(f"\n💾 Report saved as [bold green]security-report.md[/bold green]")
+    console.print(f"\n💾 Report saved as [bold green]{report_path}[/bold green]")
     return report
