@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+AGENT_DIR="$SCRIPT_DIR/security-agent"
+VENV_PYTHON="$AGENT_DIR/venv/bin/python"
+
+if [ ! -f "$VENV_PYTHON" ]; then
+    echo "❌ Error: venv not found at $AGENT_DIR/venv"
+    echo "Run: python3 -m venv $AGENT_DIR/venv && $AGENT_DIR/venv/bin/pip install -r $AGENT_DIR/requirements.txt"
+    exit 1
+fi
+
+if [ $# -lt 1 ]; then
+    echo "Usage: ./scan <file_or_folder>"
+    echo ""
+    echo "Examples:"
+    echo "  ./scan security-agent/test-secret.py   # scan a single file"
+    echo "  ./scan .                                # scan entire project"
+    echo "  ./scan src/                             # scan a folder"
+    exit 1
+fi
+
+TARGET="$1"
+
+if [ -f "$TARGET" ]; then
+    cd "$AGENT_DIR"
+    exec "$VENV_PYTHON" agent.py "$SCRIPT_DIR/$TARGET"
+else
+    cd "$AGENT_DIR"
+    exec "$VENV_PYTHON" scan.py "$SCRIPT_DIR/$TARGET"
+fi
