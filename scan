@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
 AGENT_DIR="$SCRIPT_DIR/security-agent"
 VENV_PYTHON="$AGENT_DIR/venv/bin/python"
 
@@ -12,12 +18,12 @@ if [ ! -f "$VENV_PYTHON" ]; then
 fi
 
 if [ $# -lt 1 ]; then
-    echo "Usage: ./scan <file_or_folder>"
+    echo "Usage: scan <file_or_folder>"
     echo ""
     echo "Examples:"
-    echo "  ./scan security-agent/test-secret.py   # scan a single file"
-    echo "  ./scan .                                # scan entire project"
-    echo "  ./scan src/                             # scan a folder"
+    echo "  scan myfile.py          # scan a single file"
+    echo "  scan .                  # scan current directory"
+    echo "  scan src/               # scan a folder"
     exit 1
 fi
 
