@@ -21,12 +21,16 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 
-TARGET="$1"
+TARGET="$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")"
+if [ ! -e "$TARGET" ]; then
+    echo "❌ Error: '$1' not found."
+    exit 1
+fi
 
 if [ -f "$TARGET" ]; then
     cd "$AGENT_DIR"
-    exec "$VENV_PYTHON" agent.py "$SCRIPT_DIR/$TARGET"
+    exec "$VENV_PYTHON" agent.py "$TARGET"
 else
     cd "$AGENT_DIR"
-    exec "$VENV_PYTHON" scan.py "$SCRIPT_DIR/$TARGET"
+    exec "$VENV_PYTHON" scan.py "$TARGET"
 fi
