@@ -42,21 +42,34 @@ def check_ollama_auth():
     except Exception:
         pass
 
-SYSTEM_PROMPT = """You are a CLI assistant with full filesystem access. You can read, write, create, move, copy, delete, and list files and folders. You can also run shell commands and manage environment variables.
+USER_CWD = os.environ.get("CLI_AGENT_CWD", os.getcwd())
+
+SYSTEM_PROMPT = f"""You are a CLI assistant with full filesystem access. You can read, write, create, move, copy, delete, and list files and folders. You can also run shell commands and manage environment variables.
+
+IMPORTANT: The user's current working directory is: {USER_CWD}
+When the user asks to create, read, write, move, copy, or delete files/folders without specifying an absolute path, always resolve relative to their working directory above. Only use a different location if the user explicitly provides an absolute path.
 
 When given a task:
 1. Break it down into steps
 2. Use the available tools to complete each step
 3. Confirm what you did with a brief summary
 
-Be precise and careful. Always confirm destructive actions (delete, overwrite) in your response. If a path doesn't exist, say so clearly. Use absolute paths when possible."""
+Be precise and careful. Always confirm destructive actions (delete, overwrite) in your response. If a path doesn't exist, say so clearly."""
+
+
+def _resolve(p: str) -> Path:
+    """Resolve a path relative to the user's working directory."""
+    path = Path(p)
+    if not path.is_absolute():
+        path = Path(USER_CWD) / path
+    return path.resolve()
 
 
 @tool
 def read_file(file_path: str) -> str:
     """Read the contents of a file."""
     try:
-        path = Path(file_path).resolve()
+        path = _resolve(file_path)
         if not path.exists():
             return f"Error: '{file_path}' does not exist."
         if not path.is_file():
@@ -71,7 +84,7 @@ def read_file(file_path: str) -> str:
 def write_file(file_path: str, content: str) -> str:
     """Write content to a file. Creates the file and parent directories if they don't exist. Overwrites existing content."""
     try:
-        path = Path(file_path).resolve()
+        path = _resolve(file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return f"Successfully wrote to {path}"
@@ -83,7 +96,7 @@ def write_file(file_path: str, content: str) -> str:
 def append_file(file_path: str, content: str) -> str:
     """Append content to the end of a file. Creates the file if it doesn't exist."""
     try:
-        path = Path(file_path).resolve()
+        path = _resolve(file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             f.write(content)
@@ -96,7 +109,7 @@ def append_file(file_path: str, content: str) -> str:
 def list_directory(directory_path: str) -> str:
     """List all files and folders in a directory."""
     try:
-        path = Path(directory_path).resolve()
+        path = _resolve(directory_path)
         if not path.exists():
             return f"Error: '{directory_path}' does not exist."
         if not path.is_dir():
@@ -116,8 +129,8 @@ def list_directory(directory_path: str) -> str:
 def move_path(source: str, destination: str) -> str:
     """Move a file or folder from source to destination."""
     try:
-        src = Path(source).resolve()
-        dst = Path(destination).resolve()
+        src = _resolve(source)
+        dst = _resolve(destination)
         if not src.exists():
             return f"Error: source '{source}' does not exist."
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -131,8 +144,8 @@ def move_path(source: str, destination: str) -> str:
 def copy_path(source: str, destination: str) -> str:
     """Copy a file or folder from source to destination."""
     try:
-        src = Path(source).resolve()
-        dst = Path(destination).resolve()
+        src = _resolve(source)
+        dst = _resolve(destination)
         if not src.exists():
             return f"Error: source '{source}' does not exist."
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -149,7 +162,7 @@ def copy_path(source: str, destination: str) -> str:
 def delete_path(target_path: str) -> str:
     """Delete a file or folder. Folders are deleted recursively."""
     try:
-        path = Path(target_path).resolve()
+        path = _resolve(target_path)
         if not path.exists():
             return f"Error: '{target_path}' does not exist."
         if path.is_dir():
@@ -166,7 +179,7 @@ def delete_path(target_path: str) -> str:
 def create_directory(directory_path: str) -> str:
     """Create a directory and any necessary parent directories."""
     try:
-        path = Path(directory_path).resolve()
+        path = _resolve(directory_path)
         path.mkdir(parents=True, exist_ok=True)
         return f"Created directory: {path}"
     except Exception as e:
@@ -178,7 +191,7 @@ def run_command(command: str) -> str:
     """Run a shell command and return its output. Use for tasks like grep, find, chmod, etc."""
     try:
         result = subprocess.run(
-            command, shell=True, capture_output=True, text=True, timeout=30
+            command, shell=True, capture_output=True, text=True, timeout=30, cwd=USER_CWD
         )
         output = ""
         if result.stdout:
