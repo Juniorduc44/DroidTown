@@ -1,8 +1,8 @@
+import sys
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 
-# Your SYSTEM_PROMPT (keep as is)
 SYSTEM_PROMPT = """You are a strict security auditor. Your sole job is to scan every file provided or discovered for security vulnerabilities. Be extremely thorough.
 
 What to look for:
@@ -17,11 +17,7 @@ If no issues: return '## Findings\n\nNo security issues detected.'"""
 
 @tool
 def review_code(file_path: str) -> str:
-    """Read the content of a file so the security auditor can analyze it for vulnerabilities.
-    
-    Args:
-        file_path: Full path to the file to review.
-    """
+    """Read the content of a file so the security auditor can analyze it for vulnerabilities."""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -35,11 +31,35 @@ llm = ChatOllama(
     temperature=0.0,
 )
 
-# This combination works in most current setups
 agent = create_agent(
     model=llm,
     tools=[review_code],
     system_prompt=SYSTEM_PROMPT
 )
 
-print("✅ Security Agent is ready! (using GLM-5.1:cloud)")
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python agent.py <file_or_folder>")
+        print("Example: python agent.py test-secret.py")
+        sys.exit(1)
+
+    path = sys.argv[1]
+    print(f"🔍 Scanning: {path}\n")
+
+    result = agent.invoke({
+        "messages": [{
+            "role": "user",
+            "content": f"Review this file for security issues: {path}"
+        }]
+    })
+
+    # Clean output
+    output = result
+    if isinstance(result, dict):
+        if "messages" in result and result["messages"]:
+            output = result["messages"][-1].content
+        elif "output" in result:
+            output = result["output"]
+
+    print(output)
