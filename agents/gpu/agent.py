@@ -223,16 +223,62 @@ def diagnose_driver() -> str:
                         f"  Use get_install_guide() which will detect this and recommend the correct approach."
                     )
 
-    # Package status — check for half-configured / broken
+    # Check for broken dpkg state — apt stuck in retry loop
+    broken_pkgs = _run("dpkg -l 2>/dev/null | grep -iE 'nvidia' | grep -E '^(iF|iU|iHR|rc)' | head -10")
+    dpkg_audit = _run("dpkg --audit 2>/dev/null | head -10")
+    apt_broken = _run("apt-get check 2>&1 | head -5")
+
+    has_broken_state = False
+    if broken_pkgs and broken_pkgs != "(no output)":
+        has_broken_state = True
+        checks.append(f"PROBLEM: NVIDIA packages are in a BROKEN dpkg state:\n{broken_pkgs}")
+    if dpkg_audit and dpkg_audit != "(no output)" and "nvidia" in dpkg_audit.lower():
+        has_broken_state = True
+        checks.append(f"dpkg --audit:\n{dpkg_audit}")
+    if apt_broken and "not fully installed" in apt_broken.lower():
+        has_broken_state = True
+        checks.append(f"apt reports broken packages:\n{apt_broken}")
+
+    if has_broken_state:
+        checks.append(
+            "CRITICAL: The system is in a broken package state. Every time apt runs, it will retry the "
+            "failed DKMS build, which DESTROYS the working module for the older kernel before failing again.\n"
+            "  YOU MUST FIX THIS FIRST before any other steps:\n"
+            "  Option 1 — Remove the broken packages entirely:\n"
+            "    sudo dpkg --force-remove-reinstreq --remove nvidia-kernel-dkms\n"
+            "    sudo dpkg --force-remove-reinstreq --remove nvidia-driver\n"
+            "    sudo apt --fix-broken install\n"
+            "    sudo apt autoremove -y\n"
+            "  Option 2 — Force dpkg to forget the broken state (then purge):\n"
+            "    sudo dpkg --configure -a --force-all 2>/dev/null\n"
+            "    sudo apt remove --purge -y nvidia-driver nvidia-kernel-dkms\n"
+            "    sudo apt autoremove -y\n"
+            "  After cleaning up, use get_install_guide() for the correct driver installation method."
+        )
+
+    # Package status — general listing
     existing_pkgs = _run("dpkg -l 2>/dev/null | grep -iE 'nvidia-(driver|kernel|utils)' | head -10")
     if not existing_pkgs or existing_pkgs == "(no output)":
         existing_pkgs = _run("rpm -qa 2>/dev/null | grep -i nvidia | head -10")
     if existing_pkgs and existing_pkgs != "(no output)":
         checks.append(f"Installed NVIDIA packages:\n{existing_pkgs}")
-        if "iF" in existing_pkgs or "iU" in existing_pkgs:
-            checks.append("WARNING: Some NVIDIA packages are in a broken/unconfigured state (iF/iU). This usually means DKMS compilation failed.")
     else:
         checks.append("No NVIDIA driver packages found installed.")
+
+    # Check if fallback kernel's module was destroyed by retries
+    if fallback_kernels_raw := _run("ls /boot/vmlinuz-* 2>/dev/null"):
+        other_kernels = [k.replace("/boot/vmlinuz-", "").strip() for k in fallback_kernels_raw.strip().split("\n") if kernel not in k]
+        dkms_full = _run("dkms status 2>/dev/null")
+        for ok in other_kernels:
+            if ok in (dkms_full or "") and "installed" in (dkms_full or "").lower():
+                checks.append(f"Fallback kernel {ok} still has a working NVIDIA module.")
+            elif dkms_full and ok not in dkms_full:
+                checks.append(
+                    f"WARNING: Fallback kernel {ok} may NO LONGER have a working NVIDIA module. "
+                    f"The broken dpkg retry loop may have deleted it during rebuild attempts. "
+                    f"If you boot into {ok} and nvidia-smi fails, you will need to rebuild: "
+                    f"sudo dkms install nvidia-current/<version> -k {ok}"
+                )
 
     return "\n\n".join(checks)
 
@@ -326,6 +372,10 @@ def get_install_guide() -> str:
 
     base = distro_like if distro_like else distro_id
 
+    # Check for broken dpkg state first — must be resolved before anything else
+    broken_pkgs = _run("dpkg -l 2>/dev/null | grep -iE 'nvidia' | grep -E '^(iF|iU|iHR)' | head -5")
+    has_broken_dpkg = bool(broken_pkgs and broken_pkgs != "(no output)")
+
     # Detect kernel/driver version mismatch
     repo_version = _run("apt-cache policy nvidia-driver 2>/dev/null | grep Candidate | awk '{print $2}'").strip()
     if not repo_version:
@@ -363,6 +413,22 @@ def get_install_guide() -> str:
     guide_parts.append(f"Running kernel: {kernel}")
     if repo_version:
         guide_parts.append(f"Repository driver version: {repo_version}")
+
+    # PREREQUISITE: Fix broken dpkg state if detected
+    if has_broken_dpkg:
+        guide_parts.append(f"\n{'='*60}")
+        guide_parts.append(f"URGENT: BROKEN PACKAGE STATE DETECTED")
+        guide_parts.append(f"{'='*60}")
+        guide_parts.append(f"NVIDIA packages are in a broken dpkg state. This causes apt to retry the failed")
+        guide_parts.append(f"DKMS build every time it runs, which DESTROYS any working modules for other kernels.")
+        guide_parts.append(f"You MUST fix this before doing anything else:")
+        guide_parts.append(f"")
+        guide_parts.append(f"  sudo dpkg --force-remove-reinstreq --remove nvidia-kernel-dkms")
+        guide_parts.append(f"  sudo dpkg --force-remove-reinstreq --remove nvidia-driver")
+        guide_parts.append(f"  sudo apt --fix-broken install")
+        guide_parts.append(f"  sudo apt autoremove -y")
+        guide_parts.append(f"")
+        guide_parts.append(f"After that, continue with the installation steps below.")
 
     # SCENARIO: Driver version incompatible with kernel
     if driver_too_old:
@@ -724,7 +790,9 @@ CRITICAL RULES:
 - If Secure Boot is on, always mention it as a potential blocker
 - After install steps, always remind user to reboot and run verify_install()
 - Be specific to the user's distro — don't give Ubuntu commands on Fedora
-- When the user says nvidia-smi failed after reboot, immediately suspect DKMS build failure and run diagnose_driver()"""
+- When the user says nvidia-smi failed after reboot, immediately suspect DKMS build failure and run diagnose_driver()
+- If diagnose_driver() reports broken dpkg state (iF/iU packages), this is the HIGHEST priority fix — apt is stuck in a loop that destroys working modules on every retry. Guide the user to force-remove the broken packages FIRST
+- After cleaning broken dpkg state, the user must install a compatible driver (usually the .run installer from NVIDIA if the repo driver is too old for the kernel)"""
 
 
 TOOLS = [
