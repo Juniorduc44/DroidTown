@@ -8,12 +8,13 @@ while [ -L "$SOURCE" ]; do
     [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
-AGENT_DIR="$SCRIPT_DIR/security-agent"
-VENV_PYTHON="$AGENT_DIR/venv/bin/python"
+AGENTS_DIR="$SCRIPT_DIR/agents"
+AGENT_DIR="$AGENTS_DIR/security"
+VENV_PYTHON="$AGENTS_DIR/venv/bin/python"
 
 if [ ! -f "$VENV_PYTHON" ]; then
-    echo "❌ Error: venv not found at $AGENT_DIR/venv"
-    echo "Run: python3 -m venv $AGENT_DIR/venv && $AGENT_DIR/venv/bin/pip install -r $AGENT_DIR/requirements.txt"
+    echo "❌ Error: venv not found at $AGENTS_DIR/venv"
+    echo "Run: python3 -m venv $AGENTS_DIR/venv && $AGENTS_DIR/venv/bin/pip install -r $AGENTS_DIR/requirements.txt"
     exit 1
 fi
 

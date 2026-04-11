@@ -18,7 +18,7 @@ cd DroidTown
 ## Step 2: Set Up the Virtual Environment
 
 ```bash
-cd security-agent
+cd agents
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -94,7 +94,7 @@ scan .
 ## Troubleshooting
 
 ### "venv not found" error
-Go back to [Step 2](#step-2-set-up-the-virtual-environment) and make sure the virtual environment was created inside `security-agent/`.
+Go back to [Step 2](#step-2-set-up-the-virtual-environment) and make sure the virtual environment was created inside `agents/`.
 
 ### "scan: command not found"
 Make sure the symlink directory is in your PATH. Run `echo $PATH` to check. See [Step 4](#step-4-create-a-symlink-in-your-path) for adding it.

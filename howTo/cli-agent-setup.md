@@ -20,7 +20,7 @@ cd DroidTown
 ### Step 2: Set Up the Virtual Environment
 
 ```bash
-cd cli-agent
+cd agents
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -37,8 +37,8 @@ There are two ways to use the CLI Agent.
 Launch the agent and type tasks one at a time in a loop:
 
 ```bash
-cd cli-agent
-source venv/bin/activate
+cd agents/cli
+source ../venv/bin/activate
 python agent.py
 ```
 
@@ -58,8 +58,8 @@ Type `exit`, `quit`, or `q` to leave.
 Pass the task directly as an argument:
 
 ```bash
-cd cli-agent
-source venv/bin/activate
+cd agents/cli
+source ../venv/bin/activate
 python agent.py "create a file called notes.txt with the text Hello World"
 ```
 
@@ -104,7 +104,7 @@ Here are some things you can ask the agent to do:
 ### "ModuleNotFoundError: No module named 'langchain_ollama'"
 Make sure you activated the virtual environment before running:
 ```bash
-source venv/bin/activate
+source ../venv/bin/activate
 ```
 
 ### Ollama connection errors

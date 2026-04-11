@@ -62,7 +62,7 @@ cd DroidTown
 ### Step 2: Set Up the Virtual Environment
 
 ```bash
-cd gpu-agent
+cd agents
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -75,8 +75,8 @@ cd ..
 ### Interactive Mode
 
 ```bash
-cd gpu-agent
-source venv/bin/activate
+cd agents/gpu
+source ../venv/bin/activate
 python agent.py
 ```
 
@@ -96,6 +96,12 @@ python agent.py
 
 ```bash
 python agent.py "run a full gpu health check"
+```
+
+Or from the repo root:
+
+```bash
+cd agents/gpu && source ../venv/bin/activate && python agent.py "run a full gpu health check"
 ```
 
 ## Common Scenarios
