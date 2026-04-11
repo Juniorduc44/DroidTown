@@ -1,30 +1,16 @@
 import sys
-import httpx
+import os
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent / "shared"))
+
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 
 from reporter import generate_professional_report
-
-
-def check_ollama_auth():
-    """Verify Ollama is running and cloud model auth works before starting."""
-    try:
-        resp = httpx.post(
-            "http://localhost:11434/api/chat",
-            json={"model": "glm-5.1:cloud", "messages": [{"role": "user", "content": "hi"}], "stream": False},
-            timeout=15,
-        )
-        if resp.status_code == 401 or "unauthorized" in resp.text.lower():
-            print("❌ Ollama cloud model requires authentication.")
-            print("   Run: ollama signin")
-            sys.exit(1)
-    except httpx.ConnectError:
-        print("❌ Cannot connect to Ollama. Make sure it's running: ollama serve")
-        sys.exit(1)
-    except Exception:
-        pass
+from model_select import select_model
 
 SYSTEM_PROMPT = """You are a strict security auditor. Your sole job is to scan every file provided or discovered for security vulnerabilities. Be extremely thorough.
 
@@ -49,19 +35,30 @@ def review_code(file_path: str) -> str:
         return f"Error reading file {file_path}: {str(e)}"
 
 
-llm = ChatOllama(model="glm-5.1:cloud", temperature=0.0)
+def build_agent(model_name: str):
+    """Create the agent with the selected model."""
+    llm = ChatOllama(model=model_name, temperature=0.0)
+    return create_agent(
+        model=llm,
+        tools=[review_code],
+        system_prompt=SYSTEM_PROMPT
+    )
 
-agent = create_agent(
-    model=llm,
-    tools=[review_code],
-    system_prompt=SYSTEM_PROMPT
-)
+# Module-level agent for imports from scan.py — initialized lazily
+agent = None
+
+def get_agent():
+    """Get or create the agent. Used by scan.py imports."""
+    global agent
+    if agent is None:
+        model_name = select_model()
+        os.environ["DROIDTOWN_MODEL"] = model_name
+        agent = build_agent(model_name)
+    return agent
 
 
 # ====================== Main CLI ======================
 if __name__ == "__main__":
-    check_ollama_auth()
-
     if len(sys.argv) < 2:
         print("Usage: python agent.py <file_path>")
         print("Example: python agent.py test-secret.py")
@@ -81,8 +78,10 @@ if __name__ == "__main__":
 
     print(f"🔍 Scanning file: {path.name}\n")
 
+    active_agent = get_agent()
+
     # Run security audit
-    result = agent.invoke({
+    result = active_agent.invoke({
         "messages": [{
             "role": "user",
             "content": f"Review this file for security issues: {file_path}"

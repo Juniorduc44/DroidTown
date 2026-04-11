@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from agent import agent          # ← Updated import (agent.py)
+from agent import get_agent
 from reporter import generate_professional_report
 
 # Directories to skip
@@ -27,6 +27,8 @@ if __name__ == "__main__":
     target = sys.argv[1]
     print("🚀 Starting full security scan with professional report...\n")
 
+    active_agent = get_agent()
+
     files_to_scan = get_python_files(target)
     if not files_to_scan:
         print(f"No Python files found in: {target}")
@@ -40,7 +42,7 @@ if __name__ == "__main__":
         relative = file_path.relative_to(Path.cwd()) if file_path.is_relative_to(Path.cwd()) else file_path
         print(f"🔍 Scanning: {relative}")
 
-        result = agent.invoke({
+        result = active_agent.invoke({
             "messages": [{"role": "user", "content": f"Review this file for security issues: {file_path}"}]
         })
 

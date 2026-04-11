@@ -2,45 +2,20 @@ import sys
 import os
 import shutil
 import subprocess
-import httpx
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent / "shared"))
+
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
+from model_select import select_model
 
 console = Console()
-
-
-def check_ollama_auth():
-    """Verify Ollama is running and cloud model auth works before starting."""
-    try:
-        resp = httpx.post(
-            "http://localhost:11434/api/chat",
-            json={"model": "glm-5.1:cloud", "messages": [{"role": "user", "content": "hi"}], "stream": False},
-            timeout=15,
-        )
-        if resp.status_code == 401 or "unauthorized" in resp.text.lower():
-            console.print(Panel(
-                "[bold red]Ollama cloud model requires authentication.[/bold red]\n\n"
-                "Run the following in your terminal to sign in:\n\n"
-                "  [bold cyan]ollama signin[/bold cyan]\n\n"
-                "Then try again.",
-                title="❌ Unauthorized", border_style="red"
-            ))
-            sys.exit(1)
-    except httpx.ConnectError:
-        console.print(Panel(
-            "[bold red]Cannot connect to Ollama.[/bold red]\n\n"
-            "Make sure Ollama is running:\n\n"
-            "  [bold cyan]ollama serve[/bold cyan]",
-            title="❌ Connection Error", border_style="red"
-        ))
-        sys.exit(1)
-    except Exception:
-        pass
 
 USER_CWD = os.environ.get("CLI_AGENT_CWD", os.getcwd())
 
@@ -237,16 +212,18 @@ TOOLS = [
     set_env,
 ]
 
-llm = ChatOllama(model="glm-5.1:cloud", temperature=0.0)
 
-agent = create_agent(
-    model=llm,
-    tools=TOOLS,
-    system_prompt=SYSTEM_PROMPT
-)
+def build_agent(model_name: str):
+    """Create the agent with the selected model."""
+    llm = ChatOllama(model=model_name, temperature=0.0)
+    return create_agent(
+        model=llm,
+        tools=TOOLS,
+        system_prompt=SYSTEM_PROMPT
+    )
 
 
-def run_task(task: str):
+def run_task(agent, task: str):
     """Run a single task through the agent with error handling."""
     console.print(Panel(f"[bold]{task}[/bold]", title="📋 Task", border_style="cyan"))
     try:
@@ -268,10 +245,11 @@ def run_task(task: str):
 
 
 if __name__ == "__main__":
-    check_ollama_auth()
+    model_name = select_model()
+    agent = build_agent(model_name)
 
     if len(sys.argv) > 1:
-        run_task(" ".join(sys.argv[1:]))
+        run_task(agent, " ".join(sys.argv[1:]))
     else:
         console.print(Panel(
             "[bold cyan]DroidTown CLI Agent[/bold cyan]\nType a task and press Enter. Type 'exit' to quit.",
@@ -287,4 +265,4 @@ if __name__ == "__main__":
                 break
             if not task.strip():
                 continue
-            run_task(task)
+            run_task(agent, task)
