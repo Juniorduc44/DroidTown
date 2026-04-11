@@ -1,11 +1,30 @@
 import sys
+import httpx
 from pathlib import Path
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 
-# Import the reporter function
 from reporter import generate_professional_report
+
+
+def check_ollama_auth():
+    """Verify Ollama is running and cloud model auth works before starting."""
+    try:
+        resp = httpx.post(
+            "http://localhost:11434/api/chat",
+            json={"model": "glm-5.1:cloud", "messages": [{"role": "user", "content": "hi"}], "stream": False},
+            timeout=15,
+        )
+        if resp.status_code == 401 or "unauthorized" in resp.text.lower():
+            print("❌ Ollama cloud model requires authentication.")
+            print("   Run: ollama signin")
+            sys.exit(1)
+    except httpx.ConnectError:
+        print("❌ Cannot connect to Ollama. Make sure it's running: ollama serve")
+        sys.exit(1)
+    except Exception:
+        pass
 
 SYSTEM_PROMPT = """You are a strict security auditor. Your sole job is to scan every file provided or discovered for security vulnerabilities. Be extremely thorough.
 
@@ -41,6 +60,8 @@ agent = create_agent(
 
 # ====================== Main CLI ======================
 if __name__ == "__main__":
+    check_ollama_auth()
+
     if len(sys.argv) < 2:
         print("Usage: python agent.py <file_path>")
         print("Example: python agent.py test-secret.py")

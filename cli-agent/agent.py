@@ -2,6 +2,7 @@ import sys
 import os
 import shutil
 import subprocess
+import httpx
 from pathlib import Path
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
@@ -11,6 +12,35 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 
 console = Console()
+
+
+def check_ollama_auth():
+    """Verify Ollama is running and cloud model auth works before starting."""
+    try:
+        resp = httpx.post(
+            "http://localhost:11434/api/chat",
+            json={"model": "glm-5.1:cloud", "messages": [{"role": "user", "content": "hi"}], "stream": False},
+            timeout=15,
+        )
+        if resp.status_code == 401 or "unauthorized" in resp.text.lower():
+            console.print(Panel(
+                "[bold red]Ollama cloud model requires authentication.[/bold red]\n\n"
+                "Run the following in your terminal to sign in:\n\n"
+                "  [bold cyan]ollama signin[/bold cyan]\n\n"
+                "Then try again.",
+                title="❌ Unauthorized", border_style="red"
+            ))
+            sys.exit(1)
+    except httpx.ConnectError:
+        console.print(Panel(
+            "[bold red]Cannot connect to Ollama.[/bold red]\n\n"
+            "Make sure Ollama is running:\n\n"
+            "  [bold cyan]ollama serve[/bold cyan]",
+            title="❌ Connection Error", border_style="red"
+        ))
+        sys.exit(1)
+    except Exception:
+        pass
 
 SYSTEM_PROMPT = """You are a CLI assistant with full filesystem access. You can read, write, create, move, copy, delete, and list files and folders. You can also run shell commands and manage environment variables.
 
@@ -203,15 +233,32 @@ agent = create_agent(
 )
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        task = " ".join(sys.argv[1:])
-        console.print(Panel(f"[bold]{task}[/bold]", title="📋 Task", border_style="cyan"))
+def run_task(task: str):
+    """Run a single task through the agent with error handling."""
+    console.print(Panel(f"[bold]{task}[/bold]", title="📋 Task", border_style="cyan"))
+    try:
         result = agent.invoke({
             "messages": [{"role": "user", "content": task}]
         })
         output = result["messages"][-1].content if isinstance(result, dict) and "messages" in result else str(result)
         console.print(Panel(Markdown(output), title="✅ Result", border_style="green", padding=(1, 2)))
+    except Exception as e:
+        err = str(e)
+        if "unauthorized" in err.lower() or "401" in err:
+            console.print(Panel(
+                "[bold red]Authentication expired or invalid.[/bold red]\n\n"
+                "Run: [bold cyan]ollama signin[/bold cyan]",
+                title="❌ Unauthorized", border_style="red"
+            ))
+        else:
+            console.print(Panel(f"[bold red]{err}[/bold red]", title="❌ Error", border_style="red"))
+
+
+if __name__ == "__main__":
+    check_ollama_auth()
+
+    if len(sys.argv) > 1:
+        run_task(" ".join(sys.argv[1:]))
     else:
         console.print(Panel(
             "[bold cyan]DroidTown CLI Agent[/bold cyan]\nType a task and press Enter. Type 'exit' to quit.",
@@ -227,9 +274,4 @@ if __name__ == "__main__":
                 break
             if not task.strip():
                 continue
-            console.print(Panel(f"[bold]{task}[/bold]", title="📋 Task", border_style="cyan"))
-            result = agent.invoke({
-                "messages": [{"role": "user", "content": task}]
-            })
-            output = result["messages"][-1].content if isinstance(result, dict) and "messages" in result else str(result)
-            console.print(Panel(Markdown(output), title="✅ Result", border_style="green", padding=(1, 2)))
+            run_task(task)
