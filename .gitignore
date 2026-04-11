@@ -7,3 +7,5 @@ __pycache__/
 releases/
 projectCity/
 **/projectCity/
+*error_*.txt
+*error_*.md
