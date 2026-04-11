@@ -43,33 +43,39 @@ console = Console()
 #               No            Yes
 #               │             │
 #               ▼             ▼
-#  ┌────────────────────┐  ┌─────────────────────┐
-#  │ diagnose_driver()  │  │ get_gpu_status()     │  ← nvidia-smi full stats
-#  └────────┬───────────┘  └────────┬────────────┘
-#           │                       │
-#           ▼                       ▼
-#  ┌─────────────────────┐  ┌─────────────────────┐
-#  │ get_install_guide() │  │ check_cuda()         │  ← CUDA version + libs
-#  └────────┬────────────┘  └────────┬────────────┘
-#           │                       │
-#           ▼                       ▼
-#  ┌─────────────────────┐  ┌──────────────────────┐
-#  │ verify_install()    │  │ check_ollama_gpu()    │  ← ollama ps GPU offload
-#  └────────┬────────────┘  └────────┬─────────────┘
-#           │                       │
-#           ▼                       ▼
-#  ┌─────────────────────┐  ┌──────────────────────┐
-#  │ run_gpu_benchmark() │  │ run_gpu_benchmark()   │  ← stress test + VRAM
-#  └────────┬────────────┘  └────────┬─────────────┘
-#           │                       │
-#           ▼                       ▼
-#        [REPORT]              [REPORT]
-#           │                       │
-#           └───────────┬───────────┘
-#                       ▼
-#              ┌────────────────┐
-#              │  full_report() │  ← aggregate all findings
-#              └────────────────┘
+#  ┌──────────────────────┐  ┌─────────────────────┐
+#  │ diagnose_driver()    │  │ get_gpu_status()     │
+#  │ (DKMS logs, kernel   │  └────────┬────────────┘
+#  │  compat, Secure Boot,│          │
+#  │  nouveau, packages)  │          ▼
+#  └────────┬─────────────┘  ┌─────────────────────┐
+#           │                │ check_cuda()         │
+#     Mismatch found?       └────────┬────────────┘
+#     ┌─────┴──────┐                │
+#     Yes          No               ▼
+#     │            │         ┌──────────────────────┐
+#     ▼            ▼         │ check_ollama_gpu()   │
+#  ┌──────────────────┐     └────────┬─────────────┘
+#  │check_dkms_build  │             │
+#  │  _log()          │             ▼
+#  │check_available   │     ┌──────────────────────┐
+#  │  _kernels()      │     │ run_gpu_benchmark()  │
+#  └────────┬─────────┘     └──────────────────────┘
+#           │
+#           ▼
+#  ┌──────────────────────┐
+#  │ get_install_guide()  │  ← auto-detects scenario:
+#  │                      │     • kernel/driver mismatch
+#  │  Option A: boot      │       → .run installer + fallback kernel
+#  │    older kernel      │     • DKMS failed (other)
+#  │  Option B: install   │       → fix headers + rebuild
+#  │    newer .run driver │     • fresh install
+#  └────────┬─────────────┘       → repo driver + fallback to .run
+#           │
+#           ▼
+#  ┌─────────────────────┐
+#  │ verify_install()    │  ← 6-point post-install check
+#  └─────────────────────┘
 #
 # ============================================================
 
@@ -140,28 +146,35 @@ def check_driver() -> str:
 
 @tool
 def diagnose_driver() -> str:
-    """Diagnose why the GPU driver isn't working. Checks common issues."""
+    """Diagnose why the GPU driver isn't working. Checks kernel/driver compat, DKMS, Secure Boot, nouveau, and more."""
     checks = []
 
     distro = _run("cat /etc/os-release | grep -E '^(PRETTY_NAME|ID|VERSION_ID)'")
     checks.append(f"Distribution:\n{distro}")
 
-    kernel = _run("uname -r")
-    checks.append(f"Kernel: {kernel}")
+    kernel = _run("uname -r").strip()
+    checks.append(f"Running kernel: {kernel}")
 
-    headers = _run("dpkg -l 2>/dev/null | grep linux-headers | head -3")
+    # Check all available kernels for fallback
+    available_kernels = _run("ls /boot/vmlinuz-* 2>/dev/null")
+    if available_kernels and available_kernels != "(no output)":
+        checks.append(f"Available kernels on this system:\n{available_kernels}")
+
+    headers = _run(f"dpkg -l 2>/dev/null | grep 'linux-headers-{kernel}' | head -3")
     if headers and headers != "(no output)":
-        checks.append(f"Kernel headers installed:\n{headers}")
+        checks.append(f"Kernel headers for running kernel: INSTALLED\n{headers}")
     else:
-        rpm_headers = _run("rpm -qa 2>/dev/null | grep kernel-devel | head -3")
+        rpm_headers = _run(f"rpm -qa 2>/dev/null | grep kernel-devel | head -3")
         if rpm_headers and rpm_headers != "(no output)":
-            checks.append(f"Kernel headers installed:\n{rpm_headers}")
+            checks.append(f"Kernel headers: {rpm_headers}")
         else:
-            checks.append("WARNING: Kernel headers may not be installed. Required for driver compilation.")
+            checks.append(f"PROBLEM: Kernel headers for {kernel} are NOT installed. Required for driver compilation.\n  Fix: sudo apt install -y linux-headers-{kernel}")
 
     secure_boot = _run("mokutil --sb-state 2>/dev/null")
     if "enabled" in secure_boot.lower():
-        checks.append("WARNING: Secure Boot is ENABLED — this can block NVIDIA driver loading. You may need to disable it in BIOS or sign the kernel module.")
+        checks.append("WARNING: Secure Boot is ENABLED — this can block NVIDIA driver loading. Disable in BIOS or run: sudo mokutil --disable-validation")
+    elif "not found" in secure_boot.lower() or "command not found" in secure_boot.lower():
+        checks.append("Secure Boot: Cannot check (mokutil not installed). Install with: sudo apt install mokutil")
     else:
         checks.append(f"Secure Boot: {secure_boot}")
 
@@ -169,19 +182,55 @@ def diagnose_driver() -> str:
     if blacklist and blacklist != "(no output)":
         checks.append(f"Nouveau blacklist config found:\n{blacklist}")
     else:
-        checks.append("Nouveau is NOT blacklisted — it may conflict with the NVIDIA driver.")
+        checks.append("WARNING: Nouveau is NOT blacklisted — it will conflict with the NVIDIA driver.")
 
+    nouveau_loaded = _run("lsmod | grep nouveau")
+    if nouveau_loaded and nouveau_loaded != "(no output)":
+        checks.append(f"PROBLEM: Nouveau kernel module is actively loaded. It must be blacklisted and system rebooted before NVIDIA driver can work.\n{nouveau_loaded}")
+
+    # DKMS status — critical for detecting build failures
     dkms = _run("dkms status 2>/dev/null | grep -i nvidia")
     if dkms and dkms != "(no output)":
         checks.append(f"DKMS NVIDIA status:\n{dkms}")
+        # Check if DKMS built for the RUNNING kernel
+        if kernel in dkms and "installed" in dkms.lower():
+            checks.append(f"DKMS module IS built for running kernel {kernel}.")
+        elif kernel not in dkms:
+            # Find which kernels it IS built for
+            built_kernels = [line.strip() for line in dkms.split("\n") if "installed" in line.lower()]
+            checks.append(f"PROBLEM: DKMS NVIDIA module is NOT built for running kernel {kernel}.")
+            if built_kernels:
+                checks.append(f"  It IS built for: {', '.join(built_kernels)}")
+                checks.append(f"  QUICK FIX: Boot into one of those kernels via GRUB > Advanced options.")
+            checks.append(f"  PROPER FIX: The installed driver version may be too old for kernel {kernel}. Check the build log below.")
     else:
-        checks.append("No NVIDIA DKMS modules found.")
+        checks.append("No NVIDIA DKMS modules found — driver may not be installed yet.")
 
+    # Check DKMS build log for compilation errors
+    nvidia_ver = _run("dpkg -l 2>/dev/null | grep nvidia-kernel-dkms | awk '{print $3}' | head -1").strip()
+    if nvidia_ver:
+        dkms_module = _run(f"ls -d /var/lib/dkms/nvidia-current/ /var/lib/dkms/nvidia/ 2>/dev/null | head -1").strip()
+        if dkms_module:
+            build_log = _run(f"cat {dkms_module}{nvidia_ver}/build/make.log 2>/dev/null | tail -40")
+            if build_log and build_log != "(no output)" and "Error" in build_log:
+                checks.append(f"DKMS BUILD LOG (last 40 lines) — shows why compilation failed:\n{build_log}")
+                # Detect specific known incompatibilities
+                if "__vm_flags" in build_log or "in_irq" in build_log or "implicit declaration" in build_log:
+                    checks.append(
+                        f"DIAGNOSIS: Driver version {nvidia_ver} is TOO OLD for kernel {kernel}. "
+                        f"The kernel API has changed and this driver cannot compile against it.\n"
+                        f"  SOLUTION: Install a newer driver version. The repository driver ({nvidia_ver}) is incompatible.\n"
+                        f"  Use get_install_guide() which will detect this and recommend the correct approach."
+                    )
+
+    # Package status — check for half-configured / broken
     existing_pkgs = _run("dpkg -l 2>/dev/null | grep -iE 'nvidia-(driver|kernel|utils)' | head -10")
     if not existing_pkgs or existing_pkgs == "(no output)":
         existing_pkgs = _run("rpm -qa 2>/dev/null | grep -i nvidia | head -10")
     if existing_pkgs and existing_pkgs != "(no output)":
         checks.append(f"Installed NVIDIA packages:\n{existing_pkgs}")
+        if "iF" in existing_pkgs or "iU" in existing_pkgs:
+            checks.append("WARNING: Some NVIDIA packages are in a broken/unconfigured state (iF/iU). This usually means DKMS compilation failed.")
     else:
         checks.append("No NVIDIA driver packages found installed.")
 
@@ -189,117 +238,270 @@ def diagnose_driver() -> str:
 
 
 @tool
+def check_dkms_build_log() -> str:
+    """Read the DKMS build log to understand why the NVIDIA kernel module failed to compile."""
+    kernel = _run("uname -r").strip()
+    sections = []
+
+    # Find the DKMS module directory
+    dkms_dirs = _run("ls -d /var/lib/dkms/nvidia-current/*/build/make.log /var/lib/dkms/nvidia/*/build/make.log 2>/dev/null")
+    if not dkms_dirs or dkms_dirs == "(no output)":
+        return "No DKMS build logs found. The NVIDIA driver may not have been installed via DKMS."
+
+    for log_path in dkms_dirs.strip().split("\n"):
+        log_path = log_path.strip()
+        if not log_path:
+            continue
+        version = log_path.split("/")[5] if len(log_path.split("/")) > 5 else "unknown"
+        sections.append(f"Build log for driver version {version}:")
+
+        log = _run(f"cat {log_path} 2>/dev/null | tail -50")
+        sections.append(log)
+
+        if "Error" in log:
+            sections.append(f"\nBUILD FAILED for version {version}")
+            if "__vm_flags" in log or "in_irq" in log or "implicit declaration" in log:
+                sections.append(f"CAUSE: Driver {version} uses kernel APIs removed/changed in kernel {kernel}. Driver is too old for this kernel.")
+            elif "No such file" in log and "headers" in log.lower():
+                sections.append(f"CAUSE: Kernel headers for {kernel} are missing.")
+            elif "Permission denied" in log or "Operation not permitted" in log:
+                sections.append("CAUSE: Permission issue — possibly Secure Boot blocking module signing.")
+        else:
+            sections.append(f"Build appears successful for version {version}.")
+
+    # Also show which kernels have working builds
+    dkms_status = _run("dkms status 2>/dev/null | grep -i nvidia")
+    if dkms_status and dkms_status != "(no output)":
+        sections.append(f"\nDKMS status overview:\n{dkms_status}")
+        if kernel not in dkms_status:
+            sections.append(f"\nNo working build for running kernel {kernel}.")
+        working = [l.strip() for l in dkms_status.split("\n") if "installed" in l.lower() and kernel not in l]
+        if working:
+            sections.append(f"Working builds exist for other kernels. User can boot into one of those as a quick fix.")
+
+    return "\n\n".join(sections)
+
+
+@tool
+def check_available_kernels() -> str:
+    """List all installed kernels and identify which ones have working NVIDIA drivers."""
+    sections = []
+
+    running = _run("uname -r").strip()
+    sections.append(f"Currently running kernel: {running}")
+
+    kernels = _run("ls /boot/vmlinuz-* 2>/dev/null")
+    if not kernels or kernels == "(no output)":
+        return "Cannot find kernel images in /boot/."
+
+    kernel_list = [k.replace("/boot/vmlinuz-", "").strip() for k in kernels.strip().split("\n")]
+    sections.append(f"\nInstalled kernels ({len(kernel_list)}):")
+
+    dkms_status = _run("dkms status 2>/dev/null | grep -i nvidia")
+
+    for k in kernel_list:
+        is_running = " (RUNNING)" if k == running else ""
+        has_nvidia = "NO"
+        if dkms_status and k in dkms_status and "installed" in dkms_status.lower():
+            has_nvidia = "YES"
+        sections.append(f"  • {k}{is_running} — NVIDIA module built: {has_nvidia}")
+
+    sections.append(f"\nTo boot a different kernel: reboot and select it from GRUB > Advanced options.")
+    sections.append("Hold Shift (BIOS) or Escape (UEFI) during boot to access the GRUB menu.")
+
+    return "\n\n".join(sections)
+
+
+@tool
 def get_install_guide() -> str:
-    """Generate step-by-step GPU driver installation instructions for the detected OS."""
+    """Generate step-by-step GPU driver installation instructions. Detects kernel/driver version mismatches and recommends the correct approach."""
     distro_id = _run("grep '^ID=' /etc/os-release | cut -d= -f2 | tr -d '\"'").strip()
     distro_like = _run("grep '^ID_LIKE=' /etc/os-release | cut -d= -f2 | tr -d '\"'").strip()
+    distro_pretty = _run("grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2 | tr -d '\"'").strip()
     gpu_info = _run("lspci -nn | grep -iE 'VGA|3D' | grep -i nvidia")
+    kernel = _run("uname -r").strip()
 
     if "nvidia" not in gpu_info.lower():
         return "No NVIDIA GPU detected. This guide currently supports NVIDIA GPUs only."
 
     base = distro_like if distro_like else distro_id
 
+    # Detect kernel/driver version mismatch
+    repo_version = _run("apt-cache policy nvidia-driver 2>/dev/null | grep Candidate | awk '{print $2}'").strip()
+    if not repo_version:
+        repo_version = _run("dpkg -l 2>/dev/null | grep nvidia-kernel-dkms | awk '{print $3}' | head -1").strip()
+
+    dkms_build_failed = False
+    driver_too_old = False
+    if repo_version:
+        dkms_log_paths = _run("ls /var/lib/dkms/nvidia-current/*/build/make.log /var/lib/dkms/nvidia/*/build/make.log 2>/dev/null").strip()
+        if dkms_log_paths and dkms_log_paths != "(no output)":
+            for log_path in dkms_log_paths.split("\n"):
+                log_tail = _run(f"cat {log_path.strip()} 2>/dev/null | tail -20")
+                if "Error" in log_tail:
+                    dkms_build_failed = True
+                    if "__vm_flags" in log_tail or "in_irq" in log_tail or "implicit declaration" in log_tail:
+                        driver_too_old = True
+
+    # Check if there's a working kernel available as fallback
+    dkms_status = _run("dkms status 2>/dev/null | grep -i nvidia")
+    fallback_kernels = []
+    if dkms_status and dkms_status != "(no output)":
+        for line in dkms_status.split("\n"):
+            if "installed" in line.lower():
+                # Extract kernel version from dkms status line
+                parts = line.split(",")
+                for p in parts:
+                    p = p.strip()
+                    if p and p != kernel and "." in p and not p[0].isalpha():
+                        fallback_kernels.append(p)
+
+    guide_parts = []
+    guide_parts.append(f"NVIDIA Driver Installation Guide")
+    guide_parts.append(f"Distribution: {distro_pretty}")
+    guide_parts.append(f"GPU: {gpu_info.strip()}")
+    guide_parts.append(f"Running kernel: {kernel}")
+    if repo_version:
+        guide_parts.append(f"Repository driver version: {repo_version}")
+
+    # SCENARIO: Driver version incompatible with kernel
+    if driver_too_old:
+        guide_parts.append(f"\n{'='*60}")
+        guide_parts.append(f"DETECTED: KERNEL/DRIVER VERSION MISMATCH")
+        guide_parts.append(f"{'='*60}")
+        guide_parts.append(f"The repository driver ({repo_version}) cannot compile against kernel {kernel}.")
+        guide_parts.append(f"The kernel has newer APIs that this driver version does not support.")
+
+        if fallback_kernels:
+            guide_parts.append(f"\n--- OPTION A: Quick fix — boot an older kernel (fastest) ---")
+            guide_parts.append(f"The NVIDIA module is already compiled for: {', '.join(fallback_kernels)}")
+            guide_parts.append(f"  1. Reboot your system")
+            guide_parts.append(f"  2. At the GRUB boot menu, select 'Advanced options'")
+            guide_parts.append(f"     (Hold Shift during BIOS boot, or Escape during UEFI boot to see GRUB)")
+            guide_parts.append(f"  3. Select kernel {fallback_kernels[0]}")
+            guide_parts.append(f"  4. After boot, verify: nvidia-smi")
+
+        guide_parts.append(f"\n--- OPTION B: Install a newer driver from NVIDIA (recommended long-term) ---")
+        guide_parts.append(f"  Step 1: Remove the broken DKMS module")
+        nvidia_dkms_name = "nvidia-current" if "nvidia-current" in (dkms_status or "") else "nvidia"
+        guide_parts.append(f"    sudo dkms remove {nvidia_dkms_name}/{repo_version} -k {kernel} 2>/dev/null")
+        guide_parts.append(f"")
+        guide_parts.append(f"  Step 2: Remove conflicting repo packages")
+        guide_parts.append(f"    sudo apt remove --purge -y nvidia-driver nvidia-kernel-dkms nvidia-kernel-source 2>/dev/null")
+        guide_parts.append(f"    sudo apt autoremove -y")
+        guide_parts.append(f"")
+        guide_parts.append(f"  Step 3: Make sure kernel headers and build tools are installed")
+        guide_parts.append(f"    sudo apt install -y linux-headers-$(uname -r) build-essential dkms")
+        guide_parts.append(f"")
+        guide_parts.append(f"  Step 4: Blacklist nouveau (if not already done)")
+        guide_parts.append(f'    echo -e "blacklist nouveau\\noptions nouveau modeset=0" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf')
+        guide_parts.append(f"    sudo update-initramfs -u")
+        guide_parts.append(f"")
+        guide_parts.append(f"  Step 5: Download the latest NVIDIA driver")
+        guide_parts.append(f"    Go to: https://www.nvidia.com/Download/index.aspx")
+        guide_parts.append(f"    Select your GPU, Linux 64-bit, and download the .run file.")
+        guide_parts.append(f"    Or download directly (check for latest version):")
+        guide_parts.append(f"    wget https://us.download.nvidia.com/XFree86/Linux-x86_64/570.133.07/NVIDIA-Linux-x86_64-570.133.07.run")
+        guide_parts.append(f"")
+        guide_parts.append(f"  Step 6: Install the driver")
+        guide_parts.append(f"    sudo systemctl stop gdm 2>/dev/null; sudo systemctl stop sddm 2>/dev/null; sudo systemctl stop lightdm 2>/dev/null")
+        guide_parts.append(f"    chmod +x NVIDIA-Linux-x86_64-*.run")
+        guide_parts.append(f"    sudo bash NVIDIA-Linux-x86_64-*.run --dkms")
+        guide_parts.append(f"    (Accept the license, say Yes to DKMS, Yes to 32-bit libraries if asked)")
+        guide_parts.append(f"")
+        guide_parts.append(f"  Step 7: Reboot")
+        guide_parts.append(f"    sudo reboot")
+        guide_parts.append(f"")
+        guide_parts.append(f"  Step 8: Verify after reboot")
+        guide_parts.append(f"    nvidia-smi")
+        guide_parts.append(f"    lsmod | grep nvidia")
+
+        guide_parts.append(f"\nTROUBLESHOOTING:")
+        guide_parts.append(f"  - If .run installer fails, make sure you stopped your display manager (step 6)")
+        guide_parts.append(f"  - If Secure Boot blocks it: mokutil --sb-state  (disable in BIOS if enabled)")
+        guide_parts.append(f"  - If nouveau is still loaded after reboot: check blacklist and run update-initramfs -u")
+        guide_parts.append(f"  - Check DKMS: dkms status | grep nvidia")
+        guide_parts.append(f"  - Check logs: journalctl -b | grep -i nvidia | tail -20")
+
+        return "\n".join(guide_parts)
+
+    # SCENARIO: DKMS failed for other reasons
+    if dkms_build_failed:
+        guide_parts.append(f"\nDKMS build failed. Run check_dkms_build_log() for details on the failure.")
+        guide_parts.append(f"Common causes: missing kernel headers, Secure Boot, or driver/kernel incompatibility.")
+        guide_parts.append(f"Fix missing headers: sudo apt install -y linux-headers-$(uname -r) build-essential dkms")
+        guide_parts.append(f"Then rebuild: sudo dkms autoinstall")
+        guide_parts.append(f"Then reboot: sudo reboot")
+        return "\n".join(guide_parts)
+
+    # SCENARIO: Fresh install — no driver at all
     if "debian" in base or distro_id in ("debian", "ubuntu", "parrot", "kali", "mint", "pop"):
-        return f"""NVIDIA Driver Installation — Debian/Ubuntu-based ({distro_id})
-
-GPU: {gpu_info.strip()}
-
-Step 1: Update system
-  sudo apt update && sudo apt upgrade -y
-
-Step 2: Install kernel headers (required for driver compilation)
-  sudo apt install -y linux-headers-$(uname -r) build-essential dkms
-
-Step 3: Blacklist nouveau driver
-  echo -e "blacklist nouveau\\noptions nouveau modeset=0" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf
-  sudo update-initramfs -u
-
-Step 4: Install NVIDIA driver
-  Option A — Repository (recommended):
-    sudo apt install -y nvidia-driver
-
-  Option B — Auto-detect best driver (Ubuntu/Pop):
-    sudo ubuntu-drivers install
-
-  Option C — Specific version:
-    apt search nvidia-driver
-    sudo apt install -y nvidia-driver-560
-
-Step 5: Reboot
-  sudo reboot
-
-Step 6: Verify after reboot
-  nvidia-smi
-  lsmod | grep nvidia
-
-Step 7 (optional): Install CUDA toolkit
-  sudo apt install -y nvidia-cuda-toolkit
-  nvcc --version
-
-TROUBLESHOOTING:
-  - If nvidia-smi fails after reboot, check Secure Boot: mokutil --sb-state
-  - If Secure Boot is enabled, disable it in BIOS or use: sudo mokutil --disable-validation
-  - Check dkms status: dkms status | grep nvidia
-  - Check logs: journalctl -b | grep -i nvidia | tail -20"""
+        guide_parts.append(f"\n--- Fresh Install Steps ---")
+        guide_parts.append(f"")
+        guide_parts.append(f"Step 1: Update system")
+        guide_parts.append(f"  sudo apt update && sudo apt upgrade -y")
+        guide_parts.append(f"")
+        guide_parts.append(f"Step 2: Install kernel headers and build tools")
+        guide_parts.append(f"  sudo apt install -y linux-headers-$(uname -r) build-essential dkms")
+        guide_parts.append(f"")
+        guide_parts.append(f"Step 3: Blacklist nouveau driver")
+        guide_parts.append(f'  echo -e "blacklist nouveau\\noptions nouveau modeset=0" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf')
+        guide_parts.append(f"  sudo update-initramfs -u")
+        guide_parts.append(f"")
+        guide_parts.append(f"Step 4: Install NVIDIA driver")
+        guide_parts.append(f"  Try the repository version first:")
+        guide_parts.append(f"    sudo apt install -y nvidia-driver")
+        guide_parts.append(f"")
+        guide_parts.append(f"  If that fails (DKMS build error), remove it and use NVIDIA's .run installer:")
+        guide_parts.append(f"    sudo apt remove --purge -y nvidia-driver nvidia-kernel-dkms")
+        guide_parts.append(f"    wget https://us.download.nvidia.com/XFree86/Linux-x86_64/570.133.07/NVIDIA-Linux-x86_64-570.133.07.run")
+        guide_parts.append(f"    sudo systemctl stop gdm 2>/dev/null; sudo systemctl stop sddm 2>/dev/null; sudo systemctl stop lightdm 2>/dev/null")
+        guide_parts.append(f"    sudo bash NVIDIA-Linux-x86_64-570.133.07.run --dkms")
+        guide_parts.append(f"")
+        guide_parts.append(f"Step 5: Reboot")
+        guide_parts.append(f"  sudo reboot")
+        guide_parts.append(f"")
+        guide_parts.append(f"Step 6: Verify after reboot")
+        guide_parts.append(f"  nvidia-smi")
+        guide_parts.append(f"  lsmod | grep nvidia")
+        guide_parts.append(f"")
+        guide_parts.append(f"Step 7 (optional): Install CUDA toolkit")
+        guide_parts.append(f"  sudo apt install -y nvidia-cuda-toolkit")
+        guide_parts.append(f"  nvcc --version")
+        guide_parts.append(f"")
+        guide_parts.append(f"TROUBLESHOOTING:")
+        guide_parts.append(f"  - nvidia-smi fails after reboot? Check: dkms status | grep nvidia")
+        guide_parts.append(f"  - Secure Boot blocking? Check: mokutil --sb-state")
+        guide_parts.append(f"  - Nouveau still loaded? Verify blacklist and run: sudo update-initramfs -u")
+        guide_parts.append(f"  - Check logs: journalctl -b | grep -i nvidia | tail -20")
 
     elif "rhel" in base or "fedora" in base or distro_id in ("fedora", "centos", "rocky", "alma"):
-        return f"""NVIDIA Driver Installation — RHEL/Fedora-based ({distro_id})
+        guide_parts.append(f"\n--- Fresh Install Steps (RHEL/Fedora) ---")
+        guide_parts.append(f"  sudo dnf update -y")
+        guide_parts.append(f"  sudo dnf install -y kernel-devel kernel-headers gcc make dkms")
+        guide_parts.append(f"  sudo dnf install -y https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm")
+        guide_parts.append(f"  sudo dnf install -y https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm")
+        guide_parts.append(f"  sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda")
+        guide_parts.append(f"  sudo reboot")
+        guide_parts.append(f"  nvidia-smi")
 
-GPU: {gpu_info.strip()}
-
-Step 1: Update system
-  sudo dnf update -y
-
-Step 2: Install kernel headers
-  sudo dnf install -y kernel-devel kernel-headers gcc make dkms
-
-Step 3: Enable RPM Fusion (Fedora)
-  sudo dnf install -y https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
-  sudo dnf install -y https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
-
-Step 4: Install NVIDIA driver
-  sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda
-
-Step 5: Reboot
-  sudo reboot
-
-Step 6: Verify
-  nvidia-smi"""
-
-    elif "arch" in base or distro_id == "arch" or distro_id == "manjaro":
-        return f"""NVIDIA Driver Installation — Arch-based ({distro_id})
-
-GPU: {gpu_info.strip()}
-
-Step 1: Install NVIDIA driver
-  sudo pacman -S nvidia nvidia-utils nvidia-settings
-
-Step 2: Reboot
-  sudo reboot
-
-Step 3: Verify
-  nvidia-smi"""
+    elif "arch" in base or distro_id in ("arch", "manjaro"):
+        guide_parts.append(f"\n--- Fresh Install Steps (Arch) ---")
+        guide_parts.append(f"  sudo pacman -S nvidia nvidia-utils nvidia-settings")
+        guide_parts.append(f"  sudo reboot")
+        guide_parts.append(f"  nvidia-smi")
 
     else:
-        return f"""NVIDIA Driver Installation — Generic ({distro_id})
+        guide_parts.append(f"\n--- Manual Install from NVIDIA ---")
+        guide_parts.append(f"  1. Go to https://www.nvidia.com/Download/index.aspx")
+        guide_parts.append(f"  2. Select your GPU and Linux 64-bit")
+        guide_parts.append(f"  3. Download the .run installer")
+        guide_parts.append(f"  4. sudo systemctl stop gdm (or sddm/lightdm)")
+        guide_parts.append(f"  5. sudo bash NVIDIA-Linux-x86_64-*.run --dkms")
+        guide_parts.append(f"  6. sudo reboot")
+        guide_parts.append(f"  7. nvidia-smi")
 
-GPU: {gpu_info.strip()}
-
-Your distribution ({distro_id}) doesn't match a known package manager pattern.
-
-Option 1: Check if your distro has an nvidia-driver package
-  Search your package manager for 'nvidia-driver' or 'nvidia'
-
-Option 2: Install from NVIDIA directly
-  1. Go to https://www.nvidia.com/Download/index.aspx
-  2. Select your GPU and OS
-  3. Download the .run installer
-  4. Stop display manager: sudo systemctl stop gdm (or sddm/lightdm)
-  5. Run: sudo bash NVIDIA-Linux-x86_64-*.run
-  6. Reboot
-
-After install, verify with: nvidia-smi"""
+    return "\n".join(guide_parts)
 
 
 @tool
@@ -496,10 +698,15 @@ SYSTEM_PROMPT = """You are a GPU diagnostics and setup assistant. Your job is to
 WORKFLOW — Follow this order:
 1. Start with detect_gpus() to find what hardware exists
 2. Use check_driver() to see if drivers are loaded
-3. If drivers are missing:
-   - Run diagnose_driver() to find the root cause
-   - Run get_install_guide() for step-by-step install instructions
-   - After user installs, run verify_install() to confirm it worked
+3. If drivers are missing or nvidia-smi fails:
+   - Run diagnose_driver() FIRST — it checks DKMS build logs, kernel/driver compatibility, Secure Boot, nouveau, and broken packages
+   - If diagnose_driver reveals a kernel/driver mismatch or DKMS build failure, run check_dkms_build_log() for details
+   - Run check_available_kernels() to see if the user can boot an older kernel as a quick fix
+   - Run get_install_guide() — it auto-detects the situation and provides the right steps:
+     * If driver version is too old for the kernel: recommends NVIDIA .run installer or booting older kernel
+     * If DKMS failed for other reasons: recommends fixing headers and rebuilding
+     * If no driver installed: provides fresh install steps for the detected distro
+   - After user completes install steps, run verify_install() to confirm
 4. If drivers are working:
    - Run get_gpu_status() for current utilization/temps/VRAM
    - Run check_cuda() for CUDA toolkit status
@@ -507,19 +714,25 @@ WORKFLOW — Follow this order:
 5. Use run_gpu_benchmark() to stress-test after setup
 6. Use full_report() to generate a complete health check
 
-RULES:
-- Always start by detecting the GPU before suggesting anything
+CRITICAL RULES:
+- ALWAYS run diagnose_driver() before recommending any install steps — it detects the actual problem
+- NEVER assume the repo driver will work. The diagnose tool checks if DKMS compilation failed due to kernel incompatibility
+- If the diagnosis shows a kernel/driver version mismatch, the repo driver CANNOT be fixed by reinstalling — the user needs a newer driver from NVIDIA's website or must boot an older kernel
+- Always present BOTH options when a mismatch is found: quick fix (boot older kernel) AND proper fix (.run installer)
 - Give clear, numbered steps the user can follow
-- Warn about destructive operations (blacklisting, driver removal)
+- Warn about destructive operations (blacklisting, driver removal, purging packages)
 - If Secure Boot is on, always mention it as a potential blocker
 - After install steps, always remind user to reboot and run verify_install()
-- Be specific to the user's distro — don't give Ubuntu commands on Fedora"""
+- Be specific to the user's distro — don't give Ubuntu commands on Fedora
+- When the user says nvidia-smi failed after reboot, immediately suspect DKMS build failure and run diagnose_driver()"""
 
 
 TOOLS = [
     detect_gpus,
     check_driver,
     diagnose_driver,
+    check_dkms_build_log,
+    check_available_kernels,
     get_install_guide,
     get_gpu_status,
     check_cuda,
