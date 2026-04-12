@@ -243,16 +243,30 @@ def diagnose_driver() -> str:
         checks.append(
             "CRITICAL: The system is in a broken package state. Every time apt runs, it will retry the "
             "failed DKMS build, which DESTROYS the working module for the older kernel before failing again.\n"
-            "  YOU MUST FIX THIS FIRST before any other steps:\n"
-            "  Option 1 — Remove the broken packages entirely:\n"
-            "    sudo dpkg --force-remove-reinstreq --remove nvidia-kernel-dkms\n"
+            "  YOU MUST FIX THIS FIRST before any other steps.\n"
+            "\n"
+            "  IMPORTANT: The order matters. nvidia-driver depends on nvidia-kernel-dkms, so you must\n"
+            "  remove nvidia-driver FIRST, then nvidia-kernel-dkms. Use --force-depends to break the chain.\n"
+            "  Do NOT run 'apt --fix-broken install' while nvidia-kernel-dkms is still installed — it will\n"
+            "  re-trigger the failed DKMS build and destroy working modules again.\n"
+            "\n"
+            "  Step 1 — Remove nvidia-driver (has dependency on nvidia-kernel-dkms):\n"
             "    sudo dpkg --force-remove-reinstreq --remove nvidia-driver\n"
+            "\n"
+            "  Step 2 — Remove nvidia-kernel-dkms (the broken package causing the loop):\n"
+            "    sudo dpkg --force-remove-reinstreq --force-depends --remove nvidia-kernel-dkms\n"
+            "\n"
+            "  Step 3 — NOW it is safe to fix apt (no DKMS rebuild will be triggered):\n"
             "    sudo apt --fix-broken install\n"
+            "\n"
+            "  Step 4 — Clean up leftover nvidia packages:\n"
+            "    sudo apt remove --purge -y nvidia-kernel-common nvidia-kernel-support nvidia-driver-libs 2>/dev/null\n"
             "    sudo apt autoremove -y\n"
-            "  Option 2 — Force dpkg to forget the broken state (then purge):\n"
-            "    sudo dpkg --configure -a --force-all 2>/dev/null\n"
-            "    sudo apt remove --purge -y nvidia-driver nvidia-kernel-dkms\n"
-            "    sudo apt autoremove -y\n"
+            "\n"
+            "  Step 5 — Verify clean state:\n"
+            "    dpkg -l | grep -i nvidia\n"
+            "    (Should show no nvidia packages, or only 'rc' status meaning configs remain)\n"
+            "\n"
             "  After cleaning up, use get_install_guide() for the correct driver installation method."
         )
 
@@ -421,12 +435,18 @@ def get_install_guide() -> str:
         guide_parts.append(f"{'='*60}")
         guide_parts.append(f"NVIDIA packages are in a broken dpkg state. This causes apt to retry the failed")
         guide_parts.append(f"DKMS build every time it runs, which DESTROYS any working modules for other kernels.")
-        guide_parts.append(f"You MUST fix this before doing anything else:")
+        guide_parts.append(f"You MUST fix this before doing anything else.")
         guide_parts.append(f"")
-        guide_parts.append(f"  sudo dpkg --force-remove-reinstreq --remove nvidia-kernel-dkms")
-        guide_parts.append(f"  sudo dpkg --force-remove-reinstreq --remove nvidia-driver")
-        guide_parts.append(f"  sudo apt --fix-broken install")
-        guide_parts.append(f"  sudo apt autoremove -y")
+        guide_parts.append(f"IMPORTANT: Remove nvidia-driver FIRST (it depends on nvidia-kernel-dkms).")
+        guide_parts.append(f"Do NOT run 'apt --fix-broken install' until nvidia-kernel-dkms is fully removed,")
+        guide_parts.append(f"or it will re-trigger the broken DKMS build.")
+        guide_parts.append(f"")
+        guide_parts.append(f"  Step 1: sudo dpkg --force-remove-reinstreq --remove nvidia-driver")
+        guide_parts.append(f"  Step 2: sudo dpkg --force-remove-reinstreq --force-depends --remove nvidia-kernel-dkms")
+        guide_parts.append(f"  Step 3: sudo apt --fix-broken install")
+        guide_parts.append(f"  Step 4: sudo apt remove --purge -y nvidia-kernel-common nvidia-kernel-support nvidia-driver-libs 2>/dev/null")
+        guide_parts.append(f"  Step 5: sudo apt autoremove -y")
+        guide_parts.append(f"  Step 6: dpkg -l | grep -i nvidia   (verify clean state)")
         guide_parts.append(f"")
         guide_parts.append(f"After that, continue with the installation steps below.")
 
@@ -791,7 +811,10 @@ CRITICAL RULES:
 - After install steps, always remind user to reboot and run verify_install()
 - Be specific to the user's distro — don't give Ubuntu commands on Fedora
 - When the user says nvidia-smi failed after reboot, immediately suspect DKMS build failure and run diagnose_driver()
-- If diagnose_driver() reports broken dpkg state (iF/iU packages), this is the HIGHEST priority fix — apt is stuck in a loop that destroys working modules on every retry. Guide the user to force-remove the broken packages FIRST
+- If diagnose_driver() reports broken dpkg state (iF/iU packages), this is the HIGHEST priority fix — apt is stuck in a loop that destroys working modules on every retry
+- When removing broken NVIDIA packages: ALWAYS remove nvidia-driver FIRST, then nvidia-kernel-dkms with --force-depends. The dependency chain means nvidia-kernel-dkms cannot be removed while nvidia-driver still references it
+- NEVER tell the user to run 'apt --fix-broken install' while nvidia-kernel-dkms is still installed in a broken state — apt will re-trigger the failed DKMS build, destroying working modules for other kernels in the process
+- The correct cleanup order is: (1) remove nvidia-driver, (2) remove nvidia-kernel-dkms with --force-depends, (3) THEN run apt --fix-broken install, (4) purge leftovers, (5) autoremove
 - After cleaning broken dpkg state, the user must install a compatible driver (usually the .run installer from NVIDIA if the repo driver is too old for the kernel)"""
 
 
