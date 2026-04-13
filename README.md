@@ -2,6 +2,19 @@
 
 A collection of AI-powered agents for security scanning, CLI file management, and GPU diagnostics.
 
+## Documentation
+
+Start here for a detailed architecture and capability guide:
+
+- [How DroidTown Works](howTo/how-droidtown-works.md)
+
+That document explains:
+
+- End-to-end runtime flow (`scan` -> security agent -> report generation)
+- What each agent can and cannot do today
+- Local vs global command behavior and current limitations
+- How the project is structured for future optional agent routing
+
 ## Quick Start
 
 ```bash
@@ -26,3 +39,4 @@ All agents live in the `agents/` folder with a shared virtual environment.
 - [Global `scan` command setup](howTo/global-scan-setup.md)
 - [CLI Agent usage](howTo/cli-agent-setup.md)
 - [GPU Agent usage](howTo/gpu-agent-setup.md)
+- [How DroidTown Works (detailed)](howTo/how-droidtown-works.md)
