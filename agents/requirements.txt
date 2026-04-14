@@ -15,5 +15,8 @@ pydantic==2.12.5
 PyYAML==6.0.3
 httpx==0.28.1
 
+# Browser Use Cloud SDK (browser agent)
+browser-use-sdk>=3.4.3
+
 # Make sure everything up to date use the following:
 # pip install -U -r requirements.txt
