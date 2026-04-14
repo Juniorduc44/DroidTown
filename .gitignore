@@ -10,3 +10,7 @@ projectCity/
 *error_*.txt
 *error_*.md
 browser-use_details.md
+
+# NVIDIA driver installer and install logs
+*.run
+nvidia-install-*.log
