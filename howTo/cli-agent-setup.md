@@ -32,6 +32,22 @@ cd ..
 
 There are two ways to use the CLI Agent.
 
+### Recommended: Root Launcher (`./cli`)
+
+From the DroidTown root directory:
+
+```bash
+./cli
+```
+
+Or pass a one-shot task:
+
+```bash
+./cli "create a file called notes.txt with the text Hello World"
+```
+
+This launcher is preferred because it mirrors the `scan` command behavior and automatically scopes relative paths to the directory where you invoke `cli`.
+
 ### Interactive Mode (REPL)
 
 Launch the agent and type tasks one at a time in a loop:
@@ -64,6 +80,12 @@ python agent.py "create a file called notes.txt with the text Hello World"
 ```
 
 The agent runs the task and prints the result.
+
+## Optional Global Access
+
+If you want `cli` available from any directory, follow:
+
+- [Global `cli` command setup](global-cli-setup.md)
 
 ## Available Tools
 
