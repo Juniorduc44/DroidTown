@@ -14,3 +14,5 @@ browser-use_details.md
 # NVIDIA driver installer and install logs
 *.run
 nvidia-install-*.log
+DroidCity/
+**/DroidCity/
