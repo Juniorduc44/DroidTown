@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from model_select import select_model
+from runtime import get_llm, print_runtime_banner
 
 console = Console()
 
@@ -245,8 +246,12 @@ def run_task(agent, task: str):
 
 
 if __name__ == "__main__":
-    model_name = select_model()
-    agent = build_agent(model_name)
+    print_runtime_banner()
+    llm = get_llm(droid="cli")
+    if llm is None:
+        console.print("[cyan]Running in Claude Code mode — no Ollama agent needed.[/cyan]")
+        sys.exit(0)
+    agent = create_agent(model=llm, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
 
     if len(sys.argv) > 1:
         run_task(agent, " ".join(sys.argv[1:]))

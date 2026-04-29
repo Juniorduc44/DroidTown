@@ -11,6 +11,7 @@ from langchain_core.tools import tool
 
 from reporter import generate_professional_report
 from model_select import select_model
+from runtime import get_llm, RUNTIME, Runtime, print_runtime_banner
 
 SYSTEM_PROMPT = """You are a strict security auditor. Your sole job is to scan every file provided or discovered for security vulnerabilities. Be extremely thorough.
 
@@ -35,14 +36,15 @@ def review_code(file_path: str) -> str:
         return f"Error reading file {file_path}: {str(e)}"
 
 
-def build_agent(model_name: str):
-    """Create the agent with the selected model."""
-    llm = ChatOllama(model=model_name, temperature=0.0)
-    return create_agent(
-        model=llm,
-        tools=[review_code],
-        system_prompt=SYSTEM_PROMPT
-    )
+def build_agent(model_name: str = None):
+    """Create the agent. Uses unified runtime — Ollama or Claude API."""
+    if model_name:
+        llm = ChatOllama(model=model_name, temperature=0.0)
+    else:
+        llm = get_llm(droid="reviewer")
+        if llm is None:
+            return None  # Claude Code runtime — no agent process needed
+    return create_agent(model=llm, tools=[review_code], system_prompt=SYSTEM_PROMPT)
 
 # Module-level agent for imports from scan.py — initialized lazily
 agent = None
@@ -59,6 +61,7 @@ def get_agent():
 
 # ====================== Main CLI ======================
 if __name__ == "__main__":
+    print_runtime_banner()
     if len(sys.argv) < 2:
         print("Usage: python agent.py <file_path>")
         print("Example: python agent.py test-secret.py")

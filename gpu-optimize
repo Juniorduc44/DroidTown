@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# DroidTown GPU optimizer — detect GPU and tune Ollama for max local LLM performance.
+# Usage: ./gpu-optimize
+
+set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV="$SCRIPT_DIR/agents/venv"
+
+if [ ! -d "$VENV" ]; then
+    echo "❌  Virtual environment not found. Run the install step first:"
+    echo "    cd agents && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
+    exit 1
+fi
+
+export PYTHONPATH="$SCRIPT_DIR/agents/shared"
+"$VENV/bin/python" "$SCRIPT_DIR/agents/shared/gpu_detect.py"
