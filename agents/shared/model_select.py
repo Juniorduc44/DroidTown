@@ -20,37 +20,48 @@ console = Console()
 # Ollama routes these to hosted inference — no local VRAM required.
 # ---------------------------------------------------------------------------
 OLLAMA_CLOUD_CATALOG: list[dict] = [
-    # Meta Llama
-    {"name": "llama4:scout",        "family": "Meta",       "context": "10M", "notes": "128-expert MoE, multimodal"},
-    {"name": "llama4:maverick",     "family": "Meta",       "context": "1M",  "notes": "17B active params, multimodal"},
-    {"name": "llama3.3:70b",        "family": "Meta",       "context": "128k", "notes": "top open-weight 70B"},
-    {"name": "llama3.1:405b",       "family": "Meta",       "context": "128k", "notes": "flagship, tool-capable"},
-    # Qwen
-    {"name": "qwen3:235b-a22b",     "family": "Alibaba",    "context": "128k", "notes": "235B MoE, thinking mode"},
-    {"name": "qwen3:32b",           "family": "Alibaba",    "context": "128k", "notes": "dense 32B, strong coder"},
-    {"name": "qwen2.5-coder:32b",   "family": "Alibaba",    "context": "128k", "notes": "best open coding model"},
     # DeepSeek
-    {"name": "deepseek-r1:671b",    "family": "DeepSeek",   "context": "128k", "notes": "o1-level reasoning"},
-    {"name": "deepseek-r1:70b",     "family": "DeepSeek",   "context": "128k", "notes": "reasoning, tool-capable"},
-    {"name": "deepseek-v3:685b",    "family": "DeepSeek",   "context": "128k", "notes": "frontier MoE"},
-    # Mistral
-    {"name": "mistral-large:123b",  "family": "Mistral",    "context": "128k", "notes": "top Mistral, multilingual"},
-    {"name": "mistral-small:24b",   "family": "Mistral",    "context": "128k", "notes": "efficient, fast"},
-    {"name": "codestral:22b",       "family": "Mistral",    "context": "256k", "notes": "code specialist"},
+    {"name": "deepseek-v4-flash:cloud",     "family": "DeepSeek",    "context": "1M",   "notes": "284B MoE preview, thinking"},
+    {"name": "deepseek-v4-pro:cloud",       "family": "DeepSeek",    "context": "1M",   "notes": "frontier MoE, 3 reasoning modes"},
+    {"name": "deepseek-v3.2:cloud",         "family": "DeepSeek",    "context": "128k", "notes": "tools + thinking"},
+    {"name": "deepseek-v3.1:671b-cloud",    "family": "DeepSeek",    "context": "128k", "notes": "671B, strong reasoning"},
+    # Moonshot (Kimi)
+    {"name": "kimi-k2.6:cloud",            "family": "Moonshot",    "context": "128k", "notes": "vision, agentic, thinking"},
+    {"name": "kimi-k2.5:cloud",            "family": "Moonshot",    "context": "128k", "notes": "vision, long-horizon coding"},
+    {"name": "kimi-k2-thinking:cloud",     "family": "Moonshot",    "context": "128k", "notes": "dedicated reasoning mode"},
+    {"name": "kimi-k2:1t-cloud",           "family": "Moonshot",    "context": "128k", "notes": "1T params, agentic"},
+    # Z.ai (GLM)
+    {"name": "glm-5.1:cloud",             "family": "Z.ai",        "context": "128k", "notes": "next-gen agentic, coding"},
+    {"name": "glm-5:cloud",               "family": "Z.ai",        "context": "128k", "notes": "744B total / 40B active"},
+    {"name": "glm-4.7:cloud",             "family": "Z.ai",        "context": "128k", "notes": "strong coding + tools"},
+    {"name": "glm-4.6:cloud",             "family": "Z.ai",        "context": "128k", "notes": "tools + thinking"},
     # Google
-    {"name": "gemma3:27b",          "family": "Google",     "context": "128k", "notes": "multimodal, top Gemma"},
-    {"name": "gemma3:9b",           "family": "Google",     "context": "128k", "notes": "fast, multilingual"},
-    # Microsoft
-    {"name": "phi4:14b",            "family": "Microsoft",  "context": "16k",  "notes": "small but capable"},
-    {"name": "phi4-reasoning:14b",  "family": "Microsoft",  "context": "16k",  "notes": "reasoning-optimized"},
-    # Cohere
-    {"name": "command-r-plus:104b", "family": "Cohere",     "context": "128k", "notes": "RAG champion"},
-    {"name": "command-r:35b",       "family": "Cohere",     "context": "128k", "notes": "fast RAG"},
-    # xAI
-    {"name": "granite3.3:8b",       "family": "IBM",        "context": "128k", "notes": "thinking + tools"},
-    # Other notable
-    {"name": "falcon3:10b",         "family": "TII",        "context": "32k",  "notes": "open, multilingual"},
-    {"name": "solar-pro:22b",       "family": "Upstage",    "context": "4k",   "notes": "Korean + English"},
+    {"name": "gemma4:31b-cloud",          "family": "Google",      "context": "256k", "notes": "vision, audio, thinking"},
+    {"name": "gemini-3-flash-preview:cloud","family": "Google",     "context": "128k", "notes": "vision, fast, frontier"},
+    # Alibaba (Qwen)
+    {"name": "qwen3.5:cloud",             "family": "Alibaba",     "context": "256k", "notes": "vision, thinking, multimodal"},
+    {"name": "qwen3-coder-next:cloud",    "family": "Alibaba",     "context": "128k", "notes": "agentic coding"},
+    {"name": "qwen3-next:80b-cloud",      "family": "Alibaba",     "context": "256k", "notes": "80B, efficient thinking"},
+    {"name": "qwen3-vl:235b-cloud",       "family": "Alibaba",     "context": "256k", "notes": "235B vision-language"},
+    {"name": "qwen3-coder:480b-cloud",    "family": "Alibaba",     "context": "256k", "notes": "480B coding MoE"},
+    # NVIDIA
+    {"name": "nemotron-3-super:cloud",    "family": "NVIDIA",      "context": "1M",   "notes": "120B MoE / 12B active"},
+    {"name": "nemotron-3-nano:30b-cloud", "family": "NVIDIA",      "context": "1M",   "notes": "efficient, 30B, thinking"},
+    # MiniMax
+    {"name": "minimax-m2.7:cloud",        "family": "MiniMax",     "context": "128k", "notes": "agentic, productivity"},
+    {"name": "minimax-m2.5:cloud",        "family": "MiniMax",     "context": "128k", "notes": "coding + agentic workflows"},
+    {"name": "minimax-m2.1:cloud",        "family": "MiniMax",     "context": "128k", "notes": "tools"},
+    {"name": "minimax-m2:cloud",          "family": "MiniMax",     "context": "128k", "notes": "tools + thinking"},
+    # Mistral
+    {"name": "mistral-large-3:675b-cloud","family": "Mistral",     "context": "128k", "notes": "vision, multilingual, 675B"},
+    {"name": "devstral-2:123b-cloud",     "family": "Mistral",     "context": "128k", "notes": "123B codebase agent"},
+    {"name": "devstral-small-2:24b-cloud","family": "Mistral",     "context": "128k", "notes": "24B vision + tools"},
+    {"name": "ministral-3:3b-cloud",      "family": "Mistral",     "context": "128k", "notes": "3B vision, edge-class"},
+    # OpenAI OSS
+    {"name": "gpt-oss:20b-cloud",         "family": "OpenAI",      "context": "128k", "notes": "20B, thinking"},
+    {"name": "gpt-oss:120b-cloud",        "family": "OpenAI",      "context": "128k", "notes": "120B, thinking"},
+    # Essential AI
+    {"name": "rnj-1:8b-cloud",            "family": "Essential AI","context": "128k", "notes": "8B dense, tool-optimized"},
 ]
 
 

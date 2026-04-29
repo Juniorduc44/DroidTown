@@ -70,27 +70,46 @@ When any Ollama agent starts it shows:
 
 1. **GPU status** — name, VRAM free/total, temperature, VRAM-fit recommendations
 2. **Local models** — everything pulled to your machine via `ollama pull`
-3. **Ollama Cloud catalog** — 22 hosted models, no local VRAM needed
+3. **Ollama Cloud catalog** — 32 hosted models (cloud + tools verified), no local VRAM needed
 
 **Ollama Cloud models available (no local GPU required):**
 
+All entries use verified `:cloud` tag names pulled from [ollama.com/search?c=tools&c=cloud](https://ollama.com/search?c=tools&c=cloud).
+
 | Model | Family | Context | Notes |
 |-------|--------|---------|-------|
-| `llama4:scout` | Meta | 10M | 128-expert MoE, multimodal |
-| `llama4:maverick` | Meta | 1M | 17B active params |
-| `llama3.3:70b` | Meta | 128k | Top open-weight 70B |
-| `qwen3:235b-a22b` | Alibaba | 128k | 235B MoE, thinking mode |
-| `qwen3:32b` | Alibaba | 128k | Dense 32B, strong coder |
-| `qwen2.5-coder:32b` | Alibaba | 128k | Best open coding model |
-| `deepseek-r1:671b` | DeepSeek | 128k | o1-level reasoning |
-| `deepseek-r1:70b` | DeepSeek | 128k | Reasoning + tools |
-| `deepseek-v3:685b` | DeepSeek | 128k | Frontier MoE |
-| `mistral-large:123b` | Mistral | 128k | Top Mistral, multilingual |
-| `codestral:22b` | Mistral | 256k | Code specialist |
-| `gemma3:27b` | Google | 128k | Multimodal |
-| `phi4-reasoning:14b` | Microsoft | 16k | Reasoning-optimized |
-| `command-r-plus:104b` | Cohere | 128k | RAG champion |
-| + 8 more | — | — | See `model_select.py` |
+| `deepseek-v4-flash:cloud` | DeepSeek | 1M | 284B MoE preview, thinking |
+| `deepseek-v4-pro:cloud` | DeepSeek | 1M | Frontier MoE, 3 reasoning modes |
+| `deepseek-v3.2:cloud` | DeepSeek | 128k | Tools + thinking |
+| `deepseek-v3.1:671b-cloud` | DeepSeek | 128k | 671B, strong reasoning |
+| `kimi-k2.6:cloud` | Moonshot | 128k | Vision, agentic, thinking |
+| `kimi-k2.5:cloud` | Moonshot | 128k | Vision, long-horizon coding |
+| `kimi-k2-thinking:cloud` | Moonshot | 128k | Dedicated reasoning mode |
+| `kimi-k2:1t-cloud` | Moonshot | 128k | 1T params, agentic |
+| `glm-5.1:cloud` | Z.ai | 128k | Next-gen agentic, coding |
+| `glm-5:cloud` | Z.ai | 128k | 744B total / 40B active |
+| `glm-4.7:cloud` | Z.ai | 128k | Strong coding + tools |
+| `glm-4.6:cloud` | Z.ai | 128k | Tools + thinking |
+| `gemma4:31b-cloud` | Google | 256k | Vision, audio, thinking |
+| `gemini-3-flash-preview:cloud` | Google | 128k | Vision, fast, frontier |
+| `qwen3.5:cloud` | Alibaba | 256k | Vision, thinking, multimodal |
+| `qwen3-coder-next:cloud` | Alibaba | 128k | Agentic coding |
+| `qwen3-next:80b-cloud` | Alibaba | 256k | 80B, efficient thinking |
+| `qwen3-vl:235b-cloud` | Alibaba | 256k | 235B vision-language |
+| `qwen3-coder:480b-cloud` | Alibaba | 256k | 480B coding MoE |
+| `nemotron-3-super:cloud` | NVIDIA | 1M | 120B MoE / 12B active |
+| `nemotron-3-nano:30b-cloud` | NVIDIA | 1M | Efficient, 30B, thinking |
+| `minimax-m2.7:cloud` | MiniMax | 128k | Agentic, productivity |
+| `minimax-m2.5:cloud` | MiniMax | 128k | Coding + agentic workflows |
+| `minimax-m2.1:cloud` | MiniMax | 128k | Tools |
+| `minimax-m2:cloud` | MiniMax | 128k | Tools + thinking |
+| `mistral-large-3:675b-cloud` | Mistral | 128k | Vision, multilingual, 675B |
+| `devstral-2:123b-cloud` | Mistral | 128k | 123B codebase agent |
+| `devstral-small-2:24b-cloud` | Mistral | 128k | 24B vision + tools |
+| `ministral-3:3b-cloud` | Mistral | 128k | 3B vision, edge-class |
+| `gpt-oss:20b-cloud` | OpenAI | 128k | 20B, thinking |
+| `gpt-oss:120b-cloud` | OpenAI | 128k | 120B, thinking |
+| `rnj-1:8b-cloud` | Essential AI | 128k | 8B dense, tool-optimized |
 
 Cloud models require `ollama signin`. Local models work offline.
 
