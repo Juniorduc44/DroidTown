@@ -20,19 +20,17 @@ console = Console()
 # Ollama routes these to hosted inference — no local VRAM required.
 # ---------------------------------------------------------------------------
 OLLAMA_CLOUD_CATALOG: list[dict] = [
-    # DeepSeek
-    {"name": "deepseek-v4-flash:cloud",     "family": "DeepSeek",    "context": "1M",   "notes": "284B MoE preview, thinking"},
-    {"name": "deepseek-v4-pro:cloud",       "family": "DeepSeek",    "context": "1M",   "notes": "frontier MoE, 3 reasoning modes"},
+    # DeepSeek  (v4 series = paid subscription; v3 series = free)
+    {"name": "deepseek-v4-flash:cloud",     "family": "DeepSeek",    "context": "1M",   "notes": "284B MoE preview, thinking",        "subscription": True},
+    {"name": "deepseek-v4-pro:cloud",       "family": "DeepSeek",    "context": "1M",   "notes": "frontier MoE, 3 reasoning modes",   "subscription": True},
     {"name": "deepseek-v3.2:cloud",         "family": "DeepSeek",    "context": "128k", "notes": "tools + thinking"},
     {"name": "deepseek-v3.1:671b-cloud",    "family": "DeepSeek",    "context": "128k", "notes": "671B, strong reasoning"},
-    # Moonshot (Kimi)
-    {"name": "kimi-k2.6:cloud",            "family": "Moonshot",    "context": "128k", "notes": "vision, agentic, thinking"},
-    {"name": "kimi-k2.5:cloud",            "family": "Moonshot",    "context": "128k", "notes": "vision, long-horizon coding"},
-    {"name": "kimi-k2-thinking:cloud",     "family": "Moonshot",    "context": "128k", "notes": "dedicated reasoning mode"},
-    {"name": "kimi-k2:1t-cloud",           "family": "Moonshot",    "context": "128k", "notes": "1T params, agentic"},
-    # Z.ai (GLM)
-    {"name": "glm-5.1:cloud",             "family": "Z.ai",        "context": "128k", "notes": "next-gen agentic, coding"},
-    {"name": "glm-5:cloud",               "family": "Z.ai",        "context": "128k", "notes": "744B total / 40B active"},
+    # Moonshot (Kimi)  — k2.5/k2.6 = paid; k2-thinking/k2:1t = server errors (unavailable)
+    {"name": "kimi-k2.6:cloud",            "family": "Moonshot",    "context": "128k", "notes": "vision, agentic, thinking",         "subscription": True},
+    {"name": "kimi-k2.5:cloud",            "family": "Moonshot",    "context": "128k", "notes": "vision, long-horizon coding",       "subscription": True},
+    # Z.ai (GLM)  — glm-5/5.1 = paid; glm-4.6/4.7 = free
+    {"name": "glm-5.1:cloud",             "family": "Z.ai",        "context": "128k", "notes": "next-gen agentic, coding",          "subscription": True},
+    {"name": "glm-5:cloud",               "family": "Z.ai",        "context": "128k", "notes": "744B total / 40B active",           "subscription": True},
     {"name": "glm-4.7:cloud",             "family": "Z.ai",        "context": "128k", "notes": "strong coding + tools"},
     {"name": "glm-4.6:cloud",             "family": "Z.ai",        "context": "128k", "notes": "tools + thinking"},
     # Google
@@ -122,29 +120,37 @@ def get_cloud_models() -> list[dict]:
             "name": m["name"],
             "size": "cloud",
             "cloud": True,
-            "capabilities": ["tools"],   # all cloud models support tools
+            "capabilities": ["tools"],
             "has_tools": True,
             "source": "ollama-cloud",
             "family": m.get("family", ""),
             "context": m.get("context", ""),
             "notes": m.get("notes", ""),
+            "subscription": m.get("subscription", False),
         }
         for m in OLLAMA_CLOUD_CATALOG
     ]
 
 
-def check_cloud_auth(model_name: str) -> bool:
+def check_cloud_access(model_name: str) -> str:
+    """
+    Check if a cloud model is accessible.
+    Returns: "ok" | "unauth" | "subscription" | "unknown"
+    """
     try:
         resp = httpx.post(
             "http://localhost:11434/api/chat",
             json={"model": model_name, "messages": [{"role": "user", "content": "hi"}], "stream": False},
             timeout=15,
         )
-        if resp.status_code == 401 or "unauthorized" in resp.text.lower():
-            return False
-        return True
+        txt = resp.text.lower()
+        if resp.status_code == 403 or "subscription" in txt:
+            return "subscription"
+        if resp.status_code == 401 or "unauthorized" in txt:
+            return "unauth"
+        return "ok"
     except Exception:
-        return True
+        return "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -229,15 +235,19 @@ def select_model(require_tools: bool = True, show_gpu: bool = True) -> str:
     cloud_table.add_column("Model", style="bold white")
     cloud_table.add_column("Family", style="dim", width=12)
     cloud_table.add_column("Context", style="dim", width=9)
+    cloud_table.add_column("Access", width=6)
     cloud_table.add_column("Notes", style="dim")
 
     for i, m in enumerate(cloud_models, offset + 1):
+        access_str = "[yellow]💳[/yellow]" if m.get("subscription") else "[green]✅[/green]"
         cloud_table.add_row(
-            str(i), m["name"], m.get("family", ""), m.get("context", ""), m.get("notes", "")
+            str(i), m["name"], m.get("family", ""), m.get("context", ""),
+            access_str, m.get("notes", "")
         )
 
     console.print(cloud_table)
-    console.print("[dim]Cloud models run on Ollama's hosted infrastructure — no local VRAM required.[/dim]")
+    console.print("[dim]☁ Cloud models: [green]✅[/green] free with [bold cyan]ollama signin[/bold cyan]  "
+                  "[yellow]💳[/yellow] requires paid subscription (ollama.com/upgrade)[/dim]")
     console.print()
 
     if require_tools:
@@ -269,13 +279,23 @@ def select_model(require_tools: bool = True, show_gpu: bool = True) -> str:
             console.print(f"[red]{selected['name']} doesn't support tools. Pick a model with ✓.[/red]")
             continue
 
-        if selected["cloud"] and not check_cloud_auth(selected["name"]):
-            console.print(Panel(
-                "[bold red]Cloud model requires Ollama authentication.[/bold red]\n\n"
-                "Run: [bold cyan]ollama signin[/bold cyan]  then retry.",
-                title="❌ Unauthorized", border_style="red"
-            ))
-            continue
+        if selected["cloud"]:
+            access = check_cloud_access(selected["name"])
+            if access == "subscription":
+                console.print(Panel(
+                    f"[bold yellow]{selected['name']}[/bold yellow] requires a paid Ollama subscription.\n\n"
+                    "Upgrade at: [bold cyan]https://ollama.com/upgrade[/bold cyan]\n"
+                    "Or pick a [green]✅[/green] free cloud model from the list.",
+                    title="💳 Subscription Required", border_style="yellow"
+                ))
+                continue
+            if access == "unauth":
+                console.print(Panel(
+                    "[bold red]Cloud model requires Ollama authentication.[/bold red]\n\n"
+                    "Run: [bold cyan]ollama signin[/bold cyan]  then retry.",
+                    title="❌ Unauthorized", border_style="red"
+                ))
+                continue
 
         console.print(f"\n[bold green]Using model:[/bold green] {selected['name']}\n")
         return selected["name"]
