@@ -12,6 +12,7 @@ from langchain_core.tools import tool
 from reporter import generate_professional_report
 from model_select import select_model
 from runtime import get_llm, RUNTIME, Runtime, print_runtime_banner
+from token_counter import SessionCounter, OllamaTokenCallback, print_token_summary
 
 SYSTEM_PROMPT = """You are a strict security auditor. Your sole job is to scan every file provided or discovered for security vulnerabilities. Be extremely thorough.
 
@@ -62,6 +63,8 @@ def get_agent():
 # ====================== Main CLI ======================
 if __name__ == "__main__":
     print_runtime_banner()
+    counter  = SessionCounter()
+    callback = OllamaTokenCallback(counter)
     if len(sys.argv) < 2:
         print("Usage: python agent.py <file_path>")
         print("Example: python agent.py test-secret.py")
@@ -82,6 +85,9 @@ if __name__ == "__main__":
     print(f"🔍 Scanning file: {path.name}\n")
 
     active_agent = get_agent()
+    # Attach token callback to the underlying LLM
+    if hasattr(active_agent, "agent") and hasattr(active_agent.agent, "llm"):
+        active_agent.agent.llm.callbacks = [callback]
 
     # Run security audit
     result = active_agent.invoke({
@@ -101,3 +107,4 @@ if __name__ == "__main__":
     print("="*80)
 
     generate_professional_report(findings_list)
+    print_token_summary(counter, os.environ.get("DROIDTOWN_MODEL", ""))

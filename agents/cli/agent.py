@@ -15,6 +15,7 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from model_select import select_model
 from runtime import get_llm, print_runtime_banner
+from token_counter import SessionCounter, OllamaTokenCallback, print_token_bar, print_token_summary
 
 console = Console()
 
@@ -224,7 +225,7 @@ def build_agent(model_name: str):
     )
 
 
-def run_task(agent, task: str):
+def run_task(agent, task: str, counter: SessionCounter | None = None):
     """Run a single task through the agent with error handling."""
     console.print(Panel(f"[bold]{task}[/bold]", title="📋 Task", border_style="cyan"))
     try:
@@ -233,6 +234,8 @@ def run_task(agent, task: str):
         })
         output = result["messages"][-1].content if isinstance(result, dict) and "messages" in result else str(result)
         console.print(Panel(Markdown(output), title="✅ Result", border_style="green", padding=(1, 2)))
+        if counter:
+            print_token_bar(counter)
     except Exception as e:
         err = str(e)
         if "unauthorized" in err.lower() or "401" in err:
@@ -251,23 +254,35 @@ if __name__ == "__main__":
     if llm is None:
         console.print("[cyan]Running in Claude Code mode — no Ollama agent needed.[/cyan]")
         sys.exit(0)
+
+    counter  = SessionCounter()
+    callback = OllamaTokenCallback(counter)
+    model_name = os.environ.get("DROIDTOWN_MODEL", "")
+    llm.callbacks = [callback]
+
     agent = create_agent(model=llm, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
 
     if len(sys.argv) > 1:
-        run_task(agent, " ".join(sys.argv[1:]))
+        run_task(agent, " ".join(sys.argv[1:]), counter)
+        print_token_summary(counter, model_name)
     else:
         console.print(Panel(
-            "[bold cyan]DroidTown CLI Agent[/bold cyan]\nType a task and press Enter. Type 'exit' to quit.",
+            "[bold cyan]DroidTown CLI Droid[/bold cyan]\n"
+            "Type a task and press Enter. Type 'exit' to quit.\n"
+            "[dim]Token usage shown after each response.[/dim]",
             border_style="blue"
         ))
-        while True:
-            try:
-                task = console.input("[bold yellow]> [/bold yellow]")
-            except (EOFError, KeyboardInterrupt):
-                break
-            if task.strip().lower() in ("exit", "quit", "q"):
-                console.print("[dim]Goodbye.[/dim]")
-                break
-            if not task.strip():
-                continue
-            run_task(agent, task)
+        try:
+            while True:
+                try:
+                    task = console.input("[bold yellow]> [/bold yellow]")
+                except (EOFError, KeyboardInterrupt):
+                    break
+                if task.strip().lower() in ("exit", "quit", "q"):
+                    break
+                if not task.strip():
+                    continue
+                run_task(agent, task, counter)
+        finally:
+            print_token_summary(counter, model_name)
+            console.print("[dim]Goodbye.[/dim]")
