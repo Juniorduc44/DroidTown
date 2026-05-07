@@ -1,7 +1,8 @@
 """
-DroidTown model selector — GPU-aware, cloud-aware.
+DroidTown model selector — GPU-aware, cloud-aware, Gemini-aware.
 
 Shows local Ollama models + the full Ollama cloud catalog.
+Also provides select_gemini_model() for the Gemini API runtime.
 Configures GPU env vars before returning the selected model name.
 """
 
@@ -61,6 +62,63 @@ OLLAMA_CLOUD_CATALOG: list[dict] = [
     # Essential AI
     {"name": "rnj-1:8b-cloud",            "family": "Essential AI","context": "128k", "notes": "8B dense, tool-optimized"},
 ]
+
+
+# ---------------------------------------------------------------------------
+# Gemini model catalog
+# Free-tier models: available with a Google AI Studio API key (no billing).
+# Rate limits on free tier: ~15 RPM, 1M TPM, 1500 RPD (model dependent).
+# Get a free key at: https://aistudio.google.com/app/apikey
+# ---------------------------------------------------------------------------
+GEMINI_MODELS: list[dict] = [
+    {"name": "gemini-2.0-flash",              "context": "1M",  "notes": "recommended · fast · tools",            "free": True},
+    {"name": "gemini-2.0-flash-lite",         "context": "1M",  "notes": "fastest · lowest latency · free",       "free": True},
+    {"name": "gemini-2.5-flash-preview",      "context": "1M",  "notes": "latest preview · thinking · tools",     "free": True},
+    {"name": "gemini-2.5-pro-preview",        "context": "1M",  "notes": "frontier · free preview (limited QPM)", "free": False},
+    {"name": "gemini-1.5-flash",              "context": "1M",  "notes": "stable · free tier · tools",            "free": True},
+    {"name": "gemini-1.5-flash-8b",           "context": "1M",  "notes": "small · free tier · low latency",       "free": True},
+    {"name": "gemini-1.5-pro",                "context": "2M",  "notes": "2M ctx · free tier: 2 RPM / 50 RPD",    "free": True},
+]
+
+
+def select_gemini_model() -> str:
+    """
+    Interactive Gemini model picker.
+    Returns the chosen model name string.
+    """
+    console.print(Rule("[bold blue]🔷  Google Gemini Models[/bold blue]"))
+    console.print(
+        "[dim]Free tier: [green]✅[/green] = no billing required (Google AI Studio key)  "
+        "[yellow]💳[/yellow] = billing or limited free preview[/dim]\n"
+    )
+
+    table = Table(border_style="blue", show_lines=True)
+    table.add_column("#",        style="bold yellow", width=4)
+    table.add_column("Model",    style="bold white")
+    table.add_column("Context",  style="dim", width=9)
+    table.add_column("Free?",    width=7)
+    table.add_column("Notes",    style="dim")
+
+    for i, m in enumerate(GEMINI_MODELS, 1):
+        free_str = "[green]✅[/green]" if m["free"] else "[yellow]💳[/yellow]"
+        table.add_row(str(i), m["name"], m["context"], free_str, m["notes"])
+
+    console.print(table)
+    console.print()
+
+    while True:
+        try:
+            choice = console.input("[bold yellow]Select Gemini model (number): [/bold yellow]").strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.exit(0)
+
+        if not choice.isdigit() or int(choice) < 1 or int(choice) > len(GEMINI_MODELS):
+            console.print(f"[red]Enter a number between 1 and {len(GEMINI_MODELS)}[/red]")
+            continue
+
+        selected = GEMINI_MODELS[int(choice) - 1]
+        console.print(f"\n[bold green]Using model:[/bold green] {selected['name']}\n")
+        return selected["name"]
 
 
 # ---------------------------------------------------------------------------

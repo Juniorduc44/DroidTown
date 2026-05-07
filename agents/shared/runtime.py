@@ -3,8 +3,9 @@ DroidTown unified runtime shim.
 
 Detects whether to use:
   1. Claude API  — CLAUDE_API_KEY is set
-  2. Ollama local — Ollama is reachable at localhost:11434
-  3. Claude Code  — detected via CLAUDE_CODE env var (no Python process needed;
+  2. Gemini API  — GEMINI_API_KEY is set (free tier supported)
+  3. Ollama local — Ollama is reachable at localhost:11434
+  4. Claude Code  — detected via CLAUDE_CODE env var (no Python process needed;
                     this module is a no-op and just reports the runtime)
 
 Usage in any agent:
@@ -14,11 +15,20 @@ Usage in any agent:
 
 import os
 import sys
+import pathlib
 from enum import Enum
 
 import httpx
 from rich.console import Console
 from rich.panel import Panel
+
+# Load .env from the project root (DroidTown/) without overwriting shell vars
+try:
+    from dotenv import load_dotenv
+    _proj_root = pathlib.Path(__file__).resolve().parent.parent.parent
+    load_dotenv(_proj_root / ".env", override=False)
+except ImportError:
+    pass  # dotenv not installed yet — keys must be set in the shell
 
 console = Console()
 
@@ -26,6 +36,7 @@ console = Console()
 class Runtime(str, Enum):
     CLAUDE_CODE = "claude-code"   # running inside Claude Code — no LLM object needed
     CLAUDE_API  = "claude-api"    # Anthropic API via CLAUDE_API_KEY
+    GEMINI      = "gemini"        # Google Gemini API via GEMINI_API_KEY
     OLLAMA      = "ollama"        # local or cloud Ollama
 
 
@@ -37,6 +48,9 @@ def detect_runtime() -> Runtime:
 
     if os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"):
         return Runtime.CLAUDE_API
+
+    if os.environ.get("GEMINI_API_KEY"):
+        return Runtime.GEMINI
 
     # Try Ollama
     try:
@@ -58,7 +72,8 @@ def get_llm(droid: str = "default", require_tools: bool = True):
     Return the appropriate LLM object for the detected runtime.
 
     - CLAUDE_CODE  → returns None (Claude Code IS the agent; no LLM object needed)
-    - CLAUDE_API   → returns an Anthropic ChatAnthropic LangChain object
+    - CLAUDE_API   → returns a ChatAnthropic LangChain object
+    - GEMINI       → returns a ChatGoogleGenerativeAI LangChain object
     - OLLAMA       → runs GPU setup then returns a ChatOllama object via model_select
     """
     if RUNTIME == Runtime.CLAUDE_CODE:
@@ -72,6 +87,9 @@ def get_llm(droid: str = "default", require_tools: bool = True):
 
     if RUNTIME == Runtime.CLAUDE_API:
         return _build_claude_llm(droid)
+
+    if RUNTIME == Runtime.GEMINI:
+        return _build_gemini_llm(droid)
 
     # Ollama — default path
     return _build_ollama_llm(require_tools)
@@ -109,6 +127,40 @@ def _build_ollama_llm(require_tools: bool):
     return ChatOllama(model=model_name, temperature=0.0)
 
 
+def _build_gemini_llm(droid: str):
+    """Build a LangChain ChatGoogleGenerativeAI object for the Gemini API."""
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+    except ImportError:
+        console.print(Panel(
+            "[bold red]langchain-google-genai not installed.[/bold red]\n\n"
+            "Run: [bold cyan]pip install langchain-google-genai[/bold cyan]\n"
+            "Or:  [bold cyan]pip install -r agents/requirements.txt[/bold cyan]",
+            title="❌ Missing dependency", border_style="red"
+        ))
+        sys.exit(1)
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "model_select", pathlib.Path(__file__).parent / "model_select.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # Honour a pinned model from env or let user pick
+    model_name = os.environ.get("GEMINI_MODEL") or mod.select_gemini_model()
+    os.environ["DROIDTOWN_MODEL"] = model_name
+
+    console.print(Panel(
+        f"[bold blue]Gemini runtime[/bold blue]\n"
+        f"Model: [cyan]{model_name}[/cyan]  Droid: [cyan]{droid}[/cyan]",
+        title="🤖 DroidTown — Gemini Runtime", border_style="blue"
+    ))
+    return ChatGoogleGenerativeAI(model=model_name, google_api_key=api_key, temperature=0.0)
+
+
 def _build_claude_llm(droid: str):
     """Build a LangChain ChatAnthropic object for direct API use."""
     api_key = os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
@@ -137,6 +189,7 @@ def print_runtime_banner() -> None:
     badges = {
         Runtime.CLAUDE_CODE: "[bold cyan]Claude Code[/bold cyan]",
         Runtime.CLAUDE_API:  "[bold green]Claude API[/bold green]",
+        Runtime.GEMINI:      "[bold blue]Gemini[/bold blue]",
         Runtime.OLLAMA:      "[bold magenta]Ollama[/bold magenta]",
     }
     console.print(f"[dim]DroidTown runtime:[/dim] {badges[RUNTIME]}")

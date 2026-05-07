@@ -10,6 +10,12 @@ ollama==0.6.1
 # Beautiful terminal output and reports
 rich==13.9.4
 
+# Gemini API
+langchain-google-genai>=2.0.0
+
+# .env file loading
+python-dotenv>=1.0.0
+
 # Optional but recommended for stability
 pydantic==2.12.5
 PyYAML==6.0.3
